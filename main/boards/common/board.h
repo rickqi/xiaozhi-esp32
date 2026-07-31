@@ -74,6 +74,7 @@ public:
     virtual bool GetTemperature(float& esp32temp);
     virtual bool GetTemperatureHumidity(float& temp, float& humidity) { return false; }
     virtual i2c_master_bus_handle_t GetI2cBus() { return nullptr; }
+    virtual void SyncRtcToSystemTime() {}  // write system time back to RTC (if present)
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
     virtual NetworkInterface* GetNetwork() = 0;

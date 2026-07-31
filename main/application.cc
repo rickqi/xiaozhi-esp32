@@ -302,6 +302,11 @@ void Application::HandleActivationDoneEvent() {
 
     has_server_time_ = ota_->HasServerTime();
 
+    // If server time synced, write back to PCF85063 RTC to keep it accurate
+    if (has_server_time_) {
+        Board::GetInstance().SyncRtcToSystemTime();
+    }
+
     auto display = Board::GetInstance().GetDisplay();
     std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
     display->ShowNotification(message.c_str());

@@ -6,6 +6,8 @@
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_log.h>
 #include <mbedtls/base64.h>
+#include <time.h>
+#include <sys/time.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include "custom_lcd_display.h"
@@ -20,6 +22,22 @@
 #include "custom_lcd_display.h"
 
 #define TAG "waveshare_rlcd_4_2"
+
+// PCF85063 RTC registers (I2C addr 0x51)
+#define PCF85063_ADDR       0x51
+#define PCF85063_CTRL1      0x00
+#define PCF85063_CTRL1_STOP (1 << 5)
+#define PCF85063_SEC_REG    0x04
+#define PCF85063_MIN_REG    0x05
+#define PCF85063_HR_REG     0x06
+#define PCF85063_DAY_REG    0x07
+#define PCF85063_WEEK_REG   0x08
+#define PCF85063_MONTH_REG  0x09
+#define PCF85063_YEAR_REG   0x0A
+
+// BCD helpers
+static inline uint8_t RtcToBcd(int v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
+static inline int RtcFromBcd(uint8_t v) { return (int)(((v >> 4) * 10) + (v & 0x0F)); }
 
 class CustomBoard : public WifiBoard {
 private:
@@ -41,6 +59,103 @@ private:
         i2c_bus_cfg.trans_queue_depth = 0;
         i2c_bus_cfg.flags.enable_internal_pullup = 1;
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+    }
+
+    // ---- PCF85063 RTC minimal driver (uses new IDF I2C master API) ----
+    bool RtcReadTime(struct tm *tm) {
+        if (i2c_bus_ == nullptr) return false;
+        i2c_master_dev_handle_t dev;
+        i2c_device_config_t dev_cfg = {};
+        dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        dev_cfg.device_address = PCF85063_ADDR;
+        dev_cfg.scl_speed_hz = 100000;
+        if (i2c_master_bus_add_device(i2c_bus_, &dev_cfg, &dev) != ESP_OK) return false;
+
+        uint8_t reg = PCF85063_SEC_REG;
+        uint8_t buf[7];
+        esp_err_t ret = i2c_master_transmit_receive(dev, &reg, 1, buf, 7, 100);
+        i2c_master_bus_rm_device(dev);
+        if (ret != ESP_OK) return false;
+
+        // Check oscillator stop flag (bit7 of seconds register)
+        if (buf[0] & 0x80) {
+            ESP_LOGW(TAG, "RTC: oscillator stop flag set, time may be invalid");
+        }
+        tm->tm_sec  = RtcFromBcd(buf[0] & 0x7F);
+        tm->tm_min  = RtcFromBcd(buf[1] & 0x7F);
+        tm->tm_hour = RtcFromBcd(buf[2] & 0x3F);
+        tm->tm_mday = RtcFromBcd(buf[3] & 0x3F);
+        tm->tm_wday = RtcFromBcd(buf[4] & 0x07);
+        tm->tm_mon  = RtcFromBcd(buf[5] & 0x1F) - 1;
+        tm->tm_year = RtcFromBcd(buf[6]) + 100;  // PCF85063 years 00-99 -> 2000-2099
+        return true;
+    }
+
+    bool RtcWriteTime(const struct tm *tm) {
+        if (i2c_bus_ == nullptr) return false;
+        i2c_master_dev_handle_t dev;
+        i2c_device_config_t dev_cfg = {};
+        dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        dev_cfg.device_address = PCF85063_ADDR;
+        dev_cfg.scl_speed_hz = 100000;
+        if (i2c_master_bus_add_device(i2c_bus_, &dev_cfg, &dev) != ESP_OK) return false;
+
+        // Stop clock
+        uint8_t ctrl = PCF85063_CTRL1_STOP;
+        uint8_t wbuf[2] = {PCF85063_CTRL1, ctrl};
+        i2c_master_transmit(dev, wbuf, 2, 100);
+
+        // Write time registers (reg addr + 7 time bytes)
+        uint8_t data[8];
+        data[0] = PCF85063_SEC_REG;
+        data[1] = RtcToBcd(tm->tm_sec);
+        data[2] = RtcToBcd(tm->tm_min);
+        data[3] = RtcToBcd(tm->tm_hour);
+        data[4] = RtcToBcd(tm->tm_mday);
+        data[5] = RtcToBcd(tm->tm_wday);
+        data[6] = RtcToBcd(tm->tm_mon + 1);
+        data[7] = RtcToBcd((tm->tm_year - 100) & 0xFF);
+        esp_err_t ret = i2c_master_transmit(dev, data, 8, 100);
+
+        // Restart clock
+        ctrl = 0x00;
+        wbuf[1] = ctrl;
+        i2c_master_transmit(dev, wbuf, 2, 100);
+        i2c_master_bus_rm_device(dev);
+        return (ret == ESP_OK);
+    }
+
+    // Read RTC at boot and set the system clock so time() works instantly
+    void InitRtcClock() {
+        struct tm tm;
+        if (RtcReadTime(&tm)) {
+            if (tm.tm_year >= 100 && tm.tm_year < 200) {  // valid 2000-2099
+                struct timeval tv;
+                tv.tv_sec = mktime(&tm);
+                tv.tv_usec = 0;
+                settimeofday(&tv, NULL);
+                ESP_LOGI(TAG, "RTC: boot time %04d-%02d-%02d %02d:%02d:%02d",
+                         tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                         tm.tm_hour, tm.tm_min, tm.tm_sec);
+            } else {
+                ESP_LOGW(TAG, "RTC: invalid time, skipping");
+            }
+        } else {
+            ESP_LOGW(TAG, "RTC: read failed");
+        }
+    }
+
+    // Called after server/NTP time sync to keep RTC accurate
+    void SyncRtcToSystemTimeImpl() {
+        time_t now = time(NULL);
+        if (now < 1600000000) return;  // before 2020, not synced yet
+        struct tm tm;
+        localtime_r(&now, &tm);
+        if (RtcWriteTime(&tm)) {
+            ESP_LOGI(TAG, "RTC: synced to %04d-%02d-%02d %02d:%02d:%02d",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                     tm.tm_hour, tm.tm_min, tm.tm_sec);
+        }
     }
 
     void InitializeButtons() { 
@@ -234,6 +349,7 @@ private:
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO) {    
         InitializeI2c();  
+        InitRtcClock();          // read PCF85063 RTC -> settimeofday() for instant clock
         InitializeButtons();     
         InitializeTools();
         InitializeLcdDisplay();
@@ -284,6 +400,10 @@ public:
 
     virtual bool GetTemperatureHumidity(float& temp, float& humidity) override {
         return ReadShtc3(temp, humidity);
+    }
+
+    virtual void SyncRtcToSystemTime() override {
+        SyncRtcToSystemTimeImpl();
     }
 };
 
