@@ -5,6 +5,7 @@
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_log.h>
+#include <esp_netif.h>
 #include <mbedtls/base64.h>
 #include <time.h>
 #include <sys/time.h>
@@ -15,6 +16,8 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
+#include "system_info.h"
+#include "assets/lang_config.h"
 #include "codecs/box_audio_codec.h"
 #include "wifi_station.h"
 #include "mcp_server.h"
@@ -43,6 +46,7 @@ class CustomBoard : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Button boot_button_;
+    Button key_button_{GPIO_NUM_18};
     CustomLcdDisplay *display_;
     adc_oneshot_unit_handle_t adc1_handle;
     adc_cali_handle_t cali_handle;
@@ -172,6 +176,50 @@ private:
             ESP_LOGI(TAG, "BOOT long press, taking screenshot");
             TakeScreenshot();
         });
+
+        // KEY button (GPIO18)
+        // Single click: toggle microphone mute
+        key_button_.OnClick([this]() {
+            auto codec = Board::GetInstance().GetAudioCodec();
+            if (codec != nullptr) {
+                bool muted = !codec->input_enabled();
+                codec->EnableInput(!muted);
+                ESP_LOGI(TAG, "KEY click: mic %s", muted ? "MUTED" : "UNMUTED");
+                auto display = Board::GetInstance().GetDisplay();
+                if (display) {
+                    display->ShowNotification(muted ? "Mic Muted" : "Mic On");
+                }
+            }
+        });
+        // Double click: play popup test sound
+        key_button_.OnDoubleClick([this]() {
+            ESP_LOGI(TAG, "KEY double click: play test sound");
+            auto& app = Application::GetInstance();
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+        });
+        // Long press: show system info (IP/MAC/version)
+        key_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "KEY long press: show system info");
+            auto display = Board::GetInstance().GetDisplay();
+            if (display == nullptr) return;
+
+            // IP
+            esp_netif_ip_info_t ip_info;
+            std::string ip = "--";
+            if (esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &ip_info) == ESP_OK) {
+                uint32_t addr = ip_info.ip.addr;
+                char buf[24];
+                snprintf(buf, sizeof(buf), "%d.%d.%d.%d",
+                    (int)(addr & 0xFF), (int)((addr >> 8) & 0xFF),
+                    (int)((addr >> 16) & 0xFF), (int)((addr >> 24) & 0xFF));
+                ip = buf;
+            }
+            // MAC + version
+            std::string mac = SystemInfo::GetMacAddress();
+            std::string version = SystemInfo::GetUserAgent();
+            std::string info = "IP: " + ip + "  MAC: " + mac + "  " + version;
+            display->ShowNotification(info.c_str(), 6000);
+        });
     }
 
     void InitializeTools() {
@@ -263,8 +311,11 @@ private:
         if (ret != ESP_OK) return false;
         uint16_t t_raw = ((uint16_t)raw[0] << 8) | raw[1];
         uint16_t h_raw = ((uint16_t)raw[3] << 8) | raw[4];
-        temp_c = -45.0f + 175.0f * t_raw / 65535.0f;
-        humidity_pct = 100.0f * h_raw / 65535.0f;
+        // SHTC3 calibration: add -4C offset (SHTC3_PETP_VOL) and use 65536 normalization
+        // Reference: 05_I2C_SHTC3 example T = 175*raw/65536 - 45 - 4
+        temp_c = -45.0f + 175.0f * t_raw / 65536.0f - 4.0f;
+        humidity_pct = 100.0f * h_raw / 65536.0f;
+        ESP_LOGI(TAG, "SHTC3: T=%.1fC H=%.0f%% raw=%04x %04x", temp_c, humidity_pct, t_raw, h_raw);
         return true;
     }
 
@@ -319,6 +370,15 @@ private:
         free(b64);
         free(pbm);
         ESP_LOGI(TAG, "Screenshot captured (%dx%d)", w, h);
+
+        // Show bottom notification with screenshot info
+        auto display = Board::GetInstance().GetDisplay();
+        if (display) {
+            char info[64];
+            snprintf(info, sizeof(info), "Shot: %dx%d PBM:%dKB b64:%dKB",
+                     w, h, pbm_size / 1024, (int)(b64_len / 1024));
+            display->ShowNotification(info, 4000);
+        }
     }
 
     // Serial command listener: waits for "SHOOT" on stdin

@@ -874,14 +874,6 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);  // Overlap with top_bar_
 
-    notification_label_ = lv_label_create(status_bar_);
-    lv_obj_set_width(notification_label_, LV_HOR_RES * 0.75);
-    lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
-    lv_label_set_text(notification_label_, "");
-    lv_obj_align(notification_label_, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
-
     status_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(status_label_, LV_HOR_RES * 0.75);
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
@@ -889,6 +881,30 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
+
+    // Icon + value row (centered as a group; avoids WiFi icon overlap and keeps icon adjacent to value)
+    status_icon_row_ = lv_obj_create(status_bar_);
+    lv_obj_set_size(status_icon_row_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(status_icon_row_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(status_icon_row_, 0, 0);
+    lv_obj_set_style_pad_all(status_icon_row_, 0, 0);
+    lv_obj_set_flex_flow(status_icon_row_, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(status_icon_row_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scrollbar_mode(status_icon_row_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_align(status_icon_row_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(status_icon_row_, LV_OBJ_FLAG_HIDDEN);
+
+    status_icon_label_ = lv_label_create(status_icon_row_);
+    lv_label_set_text(status_icon_label_, "");
+    lv_obj_set_style_text_font(status_icon_label_, icon_font, 0);
+    lv_obj_set_style_text_color(status_icon_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_right(status_icon_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_add_flag(status_icon_label_, LV_OBJ_FLAG_HIDDEN);
+
+    sensor_value_label_ = lv_label_create(status_icon_row_);
+    lv_label_set_text(sensor_value_label_, "");
+    lv_obj_set_style_text_font(sensor_value_label_, text_font, 0);
+    lv_obj_set_style_text_color(sensor_value_label_, lvgl_theme->text_color(), 0);
 
     /* Top layer: Bottom bar - fixed at bottom, minimum height 48, height can be adaptive */
     bottom_bar_ = lv_obj_create(screen);
@@ -913,6 +929,16 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0); // Center text alignment
     lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
     lv_obj_align(chat_message_label_, LV_ALIGN_CENTER, 0, 0); // Vertically and horizontally centered in bottom_bar_
+
+    // Notification label moved to BOTTOM bar to avoid overlapping the top status bar cycling display
+    notification_label_ = lv_label_create(bottom_bar_);
+    lv_obj_set_width(notification_label_, LV_HOR_RES - lvgl_theme->spacing(8));
+    lv_label_set_long_mode(notification_label_, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(notification_label_, "");
+    lv_obj_align(notification_label_, LV_ALIGN_TOP_MID, 0, lvgl_theme->spacing(2));
+    lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
@@ -1000,8 +1026,9 @@ static bool ReadShtc3(float& temp_c, float& humidity_pct) {
     if (ret != ESP_OK) { ESP_LOGE(TAG, "SHTC3: receive failed: %s", esp_err_to_name(ret)); return false; }
     uint16_t t_raw = ((uint16_t)raw[0] << 8) | raw[1];
     uint16_t h_raw = ((uint16_t)raw[3] << 8) | raw[4];
-    temp_c = -45.0f + 175.0f * t_raw / 65535.0f;
-    humidity_pct = 100.0f * h_raw / 65535.0f;
+        // SHTC3 calibration: add -4C offset (SHTC3_PETP_VOL) and use 65536 normalization
+        temp_c = -45.0f + 175.0f * t_raw / 65536.0f - 4.0f;
+        humidity_pct = 100.0f * h_raw / 65536.0f;
     ESP_LOGD(TAG, "SHTC3: T=%.0fC raw=0x%04x H=%.0f%% raw=0x%04x", temp_c, t_raw, humidity_pct, h_raw);
     return true;
 }
@@ -1011,40 +1038,104 @@ void LcdDisplay::UpdateStatusBar(bool update_all) {
     LvglDisplay::UpdateStatusBar(update_all);
 
     auto& app = Application::GetInstance();
-    if (app.GetDeviceState() != kDeviceStateIdle) return;
+
+    // Non-idle (listening/speaking/connecting): hide cycling row to avoid
+    // overlap with SetStatus() top-bar status text (e.g. "Listening").
+    if (app.GetDeviceState() != kDeviceStateIdle) {
+        if (status_icon_row_ != nullptr) {
+            lv_obj_add_flag(status_icon_row_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
 
     static int cycle = 0;
-    cycle = (cycle + 1) % 12;  // 12s cycle
+    cycle = (cycle + 1) % 20;  // 20s cycle: 4s temp + 4s humidity + 4s date + 4s clock + 4s battery
 
     char buf[32];
     bool show = false;
+    bool show_icon = false;
+    const char *icon = "";
 
     float temp, humidity;
-    bool have_sensor = ReadShtc3(temp, humidity);
+    bool have_sensor = Board::GetInstance().GetTemperatureHumidity(temp, humidity);
 
     if (cycle < 4 && have_sensor) {
-        snprintf(buf, sizeof(buf), "%.0fC  %.0f%%", temp, humidity);
+        // Temperature: thermometer icon + value (FactoryProgram style "%d°")
+        snprintf(buf, sizeof(buf), "%.0f°", temp);
+        icon = FONT_AWESOME_TEMPERATURE_HALF;
+        show_icon = true;
         show = true;
-    } else if (cycle >= 8) {
-        auto& board = Board::GetInstance();
-        int bat; bool chg, dchg;
-        if (board.GetBatteryLevel(bat, chg, dchg)) {
-            snprintf(buf, sizeof(buf), "%s %d%%", chg ? "CHG" : "BAT", bat);
+    } else if (cycle < 8 && have_sensor) {
+        // Humidity: droplet/rain icon + value
+        snprintf(buf, sizeof(buf), "%.0f%%", humidity);
+        icon = FONT_AWESOME_CLOUD_DRIZZLE;
+        show_icon = true;
+        show = true;
+    } else if (cycle < 12) {
+        // Date: calendar icon + MM-DD
+        time_t now = time(NULL);
+        struct tm* tm = localtime(&now);
+        if (tm->tm_year >= 2025 - 1900) {
+            strftime(buf, sizeof(buf), "%m-%d", tm);
+            icon = FONT_AWESOME_CALENDAR;
+            show_icon = true;
             show = true;
         }
-    } else {
-        // cycle 4-7: show clock directly
+    } else if (cycle < 16) {
+        // Clock: clock icon + HH:MM
         time_t now = time(NULL);
         struct tm* tm = localtime(&now);
         if (tm->tm_year >= 2025 - 1900) {
             strftime(buf, sizeof(buf), "%H:%M", tm);
+            icon = FONT_AWESOME_CLOCK;
+            show_icon = true;
+            show = true;
+        }
+    } else {
+        // Battery: battery icon (level-based) + value, consistent with other rows
+        auto& board = Board::GetInstance();
+        int bat; bool chg, dchg;
+        if (board.GetBatteryLevel(bat, chg, dchg)) {
+            snprintf(buf, sizeof(buf), "%d%%", bat);
+            if (chg) {
+                icon = FONT_AWESOME_BATTERY_BOLT;
+            } else {
+                const char* icons[] = {
+                    FONT_AWESOME_BATTERY_EMPTY,          // 0-19%
+                    FONT_AWESOME_BATTERY_QUARTER,        // 20-39%
+                    FONT_AWESOME_BATTERY_HALF,           // 40-59%
+                    FONT_AWESOME_BATTERY_THREE_QUARTERS, // 60-79%
+                    FONT_AWESOME_BATTERY_FULL,           // 80-99%
+                    FONT_AWESOME_BATTERY_FULL,           // 100%
+                };
+                icon = icons[bat / 20];
+            }
+            show_icon = true;
             show = true;
         }
     }
 
-    if (show && status_label_ != nullptr) {
+    if (show && sensor_value_label_ != nullptr && status_icon_row_ != nullptr) {
         DisplayLockGuard lock(this);
-        lv_label_set_text(status_label_, buf);
+        lv_label_set_text(sensor_value_label_, buf);
+        if (show_icon) {
+            lv_label_set_text(status_icon_label_, icon);
+            lv_obj_remove_flag(status_icon_label_, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(status_icon_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+        // Show icon+value row, hide base status label (avoid overlap)
+        lv_obj_remove_flag(status_icon_row_, LV_OBJ_FLAG_HIDDEN);
+        if (status_label_ != nullptr) {
+            lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else if (status_icon_row_ != nullptr) {
+        DisplayLockGuard lock(this);
+        lv_obj_add_flag(status_icon_row_, LV_OBJ_FLAG_HIDDEN);
+        if (status_label_ != nullptr) {
+            lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 
