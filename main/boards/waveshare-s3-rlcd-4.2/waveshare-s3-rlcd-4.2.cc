@@ -66,6 +66,39 @@ private:
             EnterWifiConfigMode();
             return true;
         });
+
+        // Temperature/humidity query (SHTC3 sensor)
+        mcp_server.AddTool("self.get_temperature_humidity",
+            "Query the current temperature in Celsius and relative humidity in percent "
+            "from the onboard temperature/humidity sensor (SHTC3).\n"
+            "Use this tool when the user asks about temperature, humidity, or environment conditions.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                float temp, hum;
+                if (GetTemperatureHumidity(temp, hum)) {
+                    cJSON* json = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(json, "temperature_celsius", temp);
+                    cJSON_AddNumberToObject(json, "humidity_percent", hum);
+                    return static_cast<cJSON*>(json);
+                }
+                return std::string("Error: temperature/humidity sensor not available");
+            });
+
+        // Battery level query
+        mcp_server.AddTool("self.get_battery_level",
+            "Query the current battery level in percent.\n"
+            "Use this tool when the user asks about battery level, remaining power, or charging status.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                int level; bool charging, discharging;
+                if (GetBatteryLevel(level, charging, discharging)) {
+                    cJSON* json = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(json, "level", level);
+                    cJSON_AddBoolToObject(json, "charging", charging);
+                    return static_cast<cJSON*>(json);
+                }
+                return std::string("Error: battery level not available");
+            });
     }
 
     void InitializeLcdDisplay() {
@@ -91,6 +124,33 @@ private:
         cali_config.atten = ADC_ATTEN_DB_12;
         cali_config.bitwidth = ADC_BITWIDTH_12;
         ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_config, &cali_handle));
+    }
+
+    // SHTC3 temperature/humidity sensor (I2C addr 0x70)
+    bool ReadShtc3(float& temp_c, float& humidity_pct) {
+        if (i2c_bus_ == nullptr) return false;
+        i2c_device_config_t dev_cfg = {};
+        dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        dev_cfg.device_address = 0x70;
+        dev_cfg.scl_speed_hz = 100000;
+        i2c_master_dev_handle_t dev_handle;
+        if (i2c_master_bus_add_device(i2c_bus_, &dev_cfg, &dev_handle) != ESP_OK)
+            return false;
+        uint8_t wake_cmd[] = {0x35, 0x17};
+        i2c_master_transmit(dev_handle, wake_cmd, 2, -1);
+        vTaskDelay(pdMS_TO_TICKS(1));
+        uint8_t meas_cmd[] = {0x7C, 0xA2};
+        i2c_master_transmit(dev_handle, meas_cmd, 2, -1);
+        vTaskDelay(pdMS_TO_TICKS(20));
+        uint8_t raw[6];
+        esp_err_t ret = i2c_master_receive(dev_handle, raw, 6, -1);
+        i2c_master_bus_rm_device(dev_handle);
+        if (ret != ESP_OK) return false;
+        uint16_t t_raw = ((uint16_t)raw[0] << 8) | raw[1];
+        uint16_t h_raw = ((uint16_t)raw[3] << 8) | raw[4];
+        temp_c = -45.0f + 175.0f * t_raw / 65535.0f;
+        humidity_pct = 100.0f * h_raw / 65535.0f;
+        return true;
     }
 
     // Screenshot: read display buffer -> P4 PBM -> base64 -> serial
@@ -220,6 +280,10 @@ public:
         else if (vol > 4.12f) level = 100;
         else                  level = (int)((vol - 3.0f) / 1.12f * 100);
         return true;
+    }
+
+    virtual bool GetTemperatureHumidity(float& temp, float& humidity) override {
+        return ReadShtc3(temp, humidity);
     }
 };
 

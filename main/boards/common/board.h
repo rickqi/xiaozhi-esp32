@@ -72,6 +72,7 @@ public:
     virtual Led* GetLed();
     virtual AudioCodec* GetAudioCodec() = 0;
     virtual bool GetTemperature(float& esp32temp);
+    virtual bool GetTemperatureHumidity(float& temp, float& humidity) { return false; }
     virtual i2c_master_bus_handle_t GetI2cBus() { return nullptr; }
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
