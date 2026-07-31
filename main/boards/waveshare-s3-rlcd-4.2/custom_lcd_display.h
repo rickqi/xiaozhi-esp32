@@ -52,6 +52,9 @@ public:
     void RLCD_ColorClear(uint8_t color);
     void RLCD_Display();
 	void RLCD_SetPixel(uint16_t x, uint16_t y, uint8_t color);
+	uint8_t GetPixel(uint16_t x, uint16_t y);
+	int GetWidth() const { return width_; }
+	int GetHeight() const { return height_; }
 };
 
 #endif

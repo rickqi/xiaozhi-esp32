@@ -337,3 +337,10 @@ void CustomLcdDisplay::RLCD_Display() {
 
 	RLCD_Sendbuffera(DispBuffer,DisplayLen);
 }
+
+uint8_t CustomLcdDisplay::GetPixel(uint16_t x, uint16_t y) {
+	if (x >= width_ || y >= height_) return ColorWhite;
+	uint32_t idx = PixelIndexLUT[x][y];
+	uint8_t  mask = PixelBitLUT[x][y];
+	return (DispBuffer[idx] & mask) ? ColorWhite : ColorBlack;
+}

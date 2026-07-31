@@ -5,6 +5,9 @@
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_log.h>
+#include <mbedtls/base64.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "custom_lcd_display.h"
 #include "wifi_board.h"
 #include "application.h"
@@ -49,6 +52,11 @@ private:
             }
             app.ToggleChatState();
         });
+        // Long press triggers screenshot
+        boot_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "BOOT long press, taking screenshot");
+            TakeScreenshot();
+        });
     }
 
     void InitializeTools() {
@@ -85,6 +93,84 @@ private:
         ESP_ERROR_CHECK(adc_cali_create_scheme_curve_fitting(&cali_config, &cali_handle));
     }
 
+    // Screenshot: read display buffer -> P4 PBM -> base64 -> serial
+    // Protocol matches tools/screenshot.py:
+    //   "SCREENSHOT_START\n" <base64 72 chars/line> "SCREENSHOT_END\n"
+    void TakeScreenshot() {
+        if (display_ == nullptr) return;
+        int w = display_->GetWidth();
+        int h = display_->GetHeight();
+        int row_bytes = (w + 7) / 8;
+        int hdr_len = snprintf(NULL, 0, "P4\n%d %d\n", w, h);
+        int pbm_size = hdr_len + row_bytes * h;
+        uint8_t *pbm = (uint8_t *)heap_caps_malloc(pbm_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (!pbm) {
+            printf("SCREENSHOT_ERROR: out of memory\n");
+            return;
+        }
+        snprintf((char *)pbm, hdr_len + 1, "P4\n%d %d\n", w, h);
+        uint8_t *pdata = pbm + hdr_len;
+        for (int y = 0; y < h; y++) {
+            for (int bx = 0; bx < row_bytes; bx++) {
+                uint8_t byte = 0;
+                for (int b = 0; b < 8; b++) {
+                    int x = bx * 8 + b;
+                    if (x >= w) break;
+                    if (display_->GetPixel(x, y) == ColorBlack)
+                        byte |= (0x80 >> b);
+                }
+                *pdata++ = byte;
+            }
+        }
+        size_t b64_len = 0;
+        mbedtls_base64_encode(NULL, 0, &b64_len, pbm, pbm_size);
+        uint8_t *b64 = (uint8_t *)malloc(b64_len + 1);
+        if (!b64) {
+            free(pbm);
+            printf("SCREENSHOT_ERROR: base64 alloc\n");
+            return;
+        }
+        mbedtls_base64_encode(b64, b64_len, &b64_len, pbm, pbm_size);
+        b64[b64_len] = '\0';
+        printf("SCREENSHOT_START\n");
+        const int chunk = 72;
+        for (size_t i = 0; i < b64_len; i += chunk) {
+            int remain = (int)b64_len - (int)i;
+            int len = (remain < chunk) ? remain : chunk;
+            printf("%.*s\n", len, (char *)b64 + i);
+        }
+        printf("SCREENSHOT_END\n");
+        fflush(stdout);
+        free(b64);
+        free(pbm);
+        ESP_LOGI(TAG, "Screenshot captured (%dx%d)", w, h);
+    }
+
+    // Serial command listener: waits for "SHOOT" on stdin
+    static void ScreenshotCmdTask(void *arg) {
+        auto board = (CustomBoard *)arg;
+        char line[64];
+        for (;;) {
+            if (fgets(line, sizeof(line), stdin) != NULL) {
+                line[strcspn(line, "\r\n")] = '\0';
+                if (strcmp(line, "SHOOT") == 0) {
+                    ESP_LOGI(TAG, "Screenshot requested via serial");
+                    board->TakeScreenshot();
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+
+    // One-shot auto screenshot ~12s after boot (screen settled)
+    static void AutoScreenshotTask(void *arg) {
+        auto board = (CustomBoard *)arg;
+        vTaskDelay(pdMS_TO_TICKS(12000));
+        ESP_LOGI(TAG, "Auto screenshot after boot");
+        board->TakeScreenshot();
+        vTaskDelete(NULL);
+    }
+
 public:
     CustomBoard() : boot_button_(BOOT_BUTTON_GPIO) {    
         InitializeI2c();  
@@ -92,6 +178,8 @@ public:
         InitializeTools();
         InitializeLcdDisplay();
         InitializeAdc();
+        xTaskCreatePinnedToCore(ScreenshotCmdTask, "scr_cmd", 6 * 1024, this, 1, NULL, 1);
+        xTaskCreatePinnedToCore(AutoScreenshotTask, "scr_auto", 6 * 1024, this, 1, NULL, 1);
    }
 
     virtual AudioCodec* GetAudioCodec() override {
