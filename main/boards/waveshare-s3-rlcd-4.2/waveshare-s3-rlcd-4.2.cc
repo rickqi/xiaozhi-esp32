@@ -1027,7 +1027,6 @@ private:
         bool need_resample = false;
         bool info_ready = false;
         uint32_t decoded_total = 0;
-        uint32_t play_start_ms = esp_timer_get_time() / 1000;
         uint32_t last_notify_ms = 0;
         music_stop_ = false;
         music_playing_ = true;
@@ -1509,6 +1508,9 @@ private:
                 } else if (strcmp(line, "SELFTEST") == 0) {
                     ESP_LOGI(TAG, "Self-test requested via serial");
                     board->RunSelfTest();
+                } else if (strcmp(line, "CHATLOG") == 0) {
+                    ESP_LOGI(TAG, "Chat log debug requested via serial");
+                    Application::GetInstance().DebugChatLog();
                 } else if (strcmp(line, "MUSICLIST") == 0) {
                     ESP_LOGI(TAG, "List music requested via serial");
                     board->ListMusic();

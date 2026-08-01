@@ -144,6 +144,11 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
         if (!codec_->InputData(data)) {
             return false;
         }
+        // Chat-log tap: raw codec PCM (interleaved mic + AEC reference) before
+        // resampling. Used to record both sides of a conversation.
+        if (callbacks_.on_input_raw) {
+            callbacks_.on_input_raw(data);
+        }
         if (codec_->input_channels() == 2) {
             auto mic_channel = std::vector<int16_t>(data.size() / 2);
             auto reference_channel = std::vector<int16_t>(data.size() / 2);
@@ -275,6 +280,10 @@ void AudioService::AudioOutputTask() {
             codec_->EnableOutput(true);
         }
         codec_->OutputData(task->pcm);
+        // Chat-log tap: PCM being played on the speaker (AI/assistant voice).
+        if (callbacks_.on_output_pcm) {
+            callbacks_.on_output_pcm(task->pcm);
+        }
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();

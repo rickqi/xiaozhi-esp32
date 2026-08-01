@@ -83,6 +83,18 @@ void Application::Initialize() {
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
+    // Chat logging taps: raw mic+ref PCM and speaker PCM.
+    // Registered on the AudioService; callbacks run on audio tasks, so the
+    // ChatLog mutex guards all writes.
+    // NOTE: with AUDIO_INPUT_REFERENCE=true the codec input channel 1 already
+    // carries the speaker playback (AEC reference loopback), so we do NOT mix
+    // the explicit output tap into the .wav (that would double the AI voice).
+    callbacks.on_input_raw = [this](const std::vector<int16_t>& pcm) {
+        chat_log_.WriteInputPcm(pcm);
+    };
+    callbacks.on_output_pcm = [this](const std::vector<int16_t>& pcm) {
+        (void)pcm;  // reserved; ref channel already captures speaker audio
+    };
     audio_service_.SetCallbacks(callbacks);
 
     // Add state change listeners
@@ -508,10 +520,20 @@ void Application::InitializeProtocol() {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
+        // Start a new chat conversation log (topic filled in from first user text).
+        chat_topic_set_ = false;
+        if (chat_log_.BeginConversation("")) {
+            conversation_active_ = true;
+        }
     });
     
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+        // End and flush the chat conversation log.
+        if (conversation_active_) {
+            chat_log_.EndConversation();
+            conversation_active_ = false;
+        }
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -543,6 +565,9 @@ void Application::InitializeProtocol() {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
+                    if (conversation_active_) {
+                        chat_log_.LogAssistant(text->valuestring);
+                    }
                     Schedule([this, display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
                     });
@@ -552,6 +577,16 @@ void Application::InitializeProtocol() {
             auto text = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(text)) {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
+                // Log user utterance; first one becomes the conversation topic.
+                if (conversation_active_) {
+                    if (!chat_topic_set_ && text->valuestring[0] != '\0') {
+                        std::string topic(text->valuestring);
+                        if (topic.size() > 24) topic = topic.substr(0, 24);
+                        chat_log_.SetTopic(topic);
+                        chat_topic_set_ = true;
+                    }
+                    chat_log_.LogUser(text->valuestring);
+                }
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
                 });
@@ -1055,6 +1090,32 @@ void Application::ResetProtocol() {
         }
         // Reset protocol
         protocol_.reset();
+    });
+}
+
+void Application::DebugChatLog() {
+    // Synthetic chat-logging cycle for SD-card verification without a server.
+    Schedule([this]() {
+        if (chat_log_.BeginConversation("")) {
+            conversation_active_ = true;
+            chat_topic_set_ = false;
+            // Simulate: user asks, assistant replies, then we set the topic and end.
+            chat_log_.SetTopic("设备调试");
+            chat_log_.LogUser("今天天气怎么样");
+            chat_log_.LogAssistant("今天天气晴朗，气温26度。");
+            // Inject a short burst of synthetic audio (silence+beep) so the .wav
+            // contains a valid PCM stream the user can inspect.
+            std::vector<int16_t> beep(2400 * 2, 0);  // 0.1s stereo silence
+            for (size_t i = 0; i + 1 < beep.size(); i += 2) {
+                beep[i] = (int16_t)(12000 * ((i / 2) % 400 < 200 ? 1 : -1));  // square wave ~1kHz
+            }
+            chat_log_.WriteInputPcm(beep);
+            chat_log_.EndConversation();
+            conversation_active_ = false;
+            ESP_LOGI("Application", "DebugChatLog: completed synthetic chat log");
+        } else {
+            ESP_LOGE("Application", "DebugChatLog: BeginConversation failed (SD?)");
+        }
     });
 }
 

@@ -94,6 +94,7 @@ I (21836) waveshare_rlcd_4_2: SELFTEST SelfTest: 7/7 ALL PASS
 | `MUSICLIST` | 列出 SD 卡音乐（/sdcard/music/） |
 | `MUSICPLAY <文件名>` | 播放指定 MP3（如 `MUSICPLAY song1.mp3`） |
 | `MUSICSTOP` | 停止音乐播放 |
+| `CHATLOG` | 触发模拟对话日志（验证 chatlogs 落盘） |
 
 ### 5. 音乐播放（MP3）
 
@@ -103,6 +104,17 @@ I (21836) waveshare_rlcd_4_2: SELFTEST SelfTest: 7/7 ALL PASS
 - FATFS 配置为 **UTF-8 文件名 + codepage 936**（`sdkconfig.defaults.esp32s3`），中文名歌曲可正常识别/播放
 - 播放时自动暂停 AI 对话，结束/停止后自动恢复；支持 `MUSICSTOP` 中途停止
 - 详见 [docs/usage.md 第 7 章](../../../docs/usage.md)
+
+### 6. 对话日志（ChatLog）
+
+- 自动将每次 AI 对话的**文本 + 语音**保存到 `/sdcard/logs/chatlogs/`
+- 文件名 = **对话起始时间 + 首句主题**：`chat_20260801_201417_设备调试.txt/.wav`
+- `.txt` 为 JSONL（时间戳 + 角色 + 内容）；`.wav` 为 24kHz 立体声（ch0=麦克风，ch1=AI 喇叭 AEC 回采）
+- 文本 hook：`Application::OnIncomingJson` 的 stt/tts 分支（application.cc）
+- 音频 tap：`AudioService` 新增 `on_input_raw`/`on_output_pcm` 回调（AEC 参考通道天然含 AI 声音）
+- 会话边界：音频通道打开/关闭（`OnAudioChannelOpened/Closed`）
+- 串口 `CHATLOG` 命令可触发模拟会话验证
+- 详见 [docs/usage.md 第 8 章](../../../docs/usage.md)
 
 ---
 
@@ -136,6 +148,7 @@ idf.py -p COM4 flash monitor
 
 | 版本/提交 | 内容 |
 |---|---|
+| 本次 | **新增对话日志（ChatLog）**：AI 对话文本+语音自动保存到 `/sdcard/logs/chatlogs/`，按时间+主题命名；`AudioService` 新增输入/输出音频 tap 回调；JSONL 文本 + 24kHz 双通道 WAV（麦克风+AI喇叭AEC回采）；串口 `CHATLOG` 调试命令 |
 | 本次 | **新增 MP3 音乐播放**：`espressif/esp_audio_codec` 解码 + MCP 工具（list/play/stop/delete_music）+ 串口命令（MUSICLIST/MUSICPLAY/MUSICSTOP）+ `/sdcard/music` 目录 + 线性插值重采样链 |
 | 本次 | **中文文件名支持**：FATFS 切换 UTF-8 API 编码 + codepage 936（简体中文），中文歌名可识别/播放 |
 | 本次 | **修复音乐播放后语音失效**：新增 `ResumeAudioService()` 在音频服务重启后按设备状态恢复唤醒词/语音处理（`AudioService::Start()` 会清除唤醒词事件位且状态不切换时无人重启用） |

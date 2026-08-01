@@ -16,6 +16,7 @@
 #include "audio_service.h"
 #include "device_state.h"
 #include "device_state_machine.h"
+#include "chat_log.h"
 
 // Main event bits
 #define MAIN_EVENT_SCHEDULE             (1 << 0)
@@ -112,6 +113,12 @@ public:
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
+
+    /**
+     * Debug helper: run a synthetic chat-logging cycle (begin -> user -> assistant
+     * -> end) to verify SD card chatlogs writing without a live server session.
+     */
+    void DebugChatLog();
     
     /**
      * Reset protocol resources (thread-safe)
@@ -143,6 +150,10 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
+    // Chat logging to SD card (/sdcard/logs/chatlogs).
+    ChatLog chat_log_;
+    bool chat_topic_set_ = false;   // topic derived from first user utterance
+    bool conversation_active_ = false;
 
     // Event handlers
     void HandleStateChangedEvent();

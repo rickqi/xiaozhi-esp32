@@ -57,6 +57,12 @@ struct AudioServiceCallbacks {
     std::function<void(const std::string&)> on_wake_word_detected;
     std::function<void(bool)> on_vad_change;
     std::function<void(void)> on_audio_testing_queue_full;
+    // Raw audio taps for chat logging / monitoring.
+    // on_input_raw:  interleaved stereo (mic, AEC-reference) PCM at codec input
+    //                sample rate (24kHz), fired before resampling.
+    // on_output_pcm: mono PCM being sent to the speaker (24kHz).
+    std::function<void(const std::vector<int16_t>&)> on_input_raw;
+    std::function<void(const std::vector<int16_t>&)> on_output_pcm;
 };
 
 
