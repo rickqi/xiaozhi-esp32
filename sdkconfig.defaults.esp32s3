@@ -29,3 +29,8 @@ CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE=1536
 
 # LVGL Graphics
 CONFIG_LV_USE_SNAPSHOT=y
+
+# FATFS: UTF-8 filename encoding + Simplified Chinese codepage
+# (required for Chinese filenames in /sdcard/music, /sdcard/records etc.)
+CONFIG_FATFS_CODEPAGE_936=y
+CONFIG_FATFS_API_ENCODING_UTF_8=y
