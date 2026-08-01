@@ -79,3 +79,9 @@ CONFIG_LV_BUILD_DEMOS=n
 
 # Board selection
 CONFIG_BOARD_TYPE_WAVESHARE_S3_RLCD_4_2=y
+
+# === FATFS (SD card support) ===
+# Long file names required for records/logs filenames
+CONFIG_FATFS_LFN_HEAP=y
+# CONFIG_FATFS_LFN_NONE is not set
+# CONFIG_FATFS_LFN_STACK is not set

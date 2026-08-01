@@ -930,14 +930,15 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
     lv_obj_align(chat_message_label_, LV_ALIGN_CENTER, 0, 0); // Vertically and horizontally centered in bottom_bar_
 
-    // Notification label moved to BOTTOM bar to avoid overlapping the top status bar cycling display
-    notification_label_ = lv_label_create(bottom_bar_);
+    // Notification label as a floating banner ABOVE bottom_bar_ (no overlap with chat message)
+    notification_label_ = lv_label_create(screen);
     lv_obj_set_width(notification_label_, LV_HOR_RES - lvgl_theme->spacing(8));
     lv_label_set_long_mode(notification_label_, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(notification_label_, "");
-    lv_obj_align(notification_label_, LV_ALIGN_TOP_MID, 0, lvgl_theme->spacing(2));
+    // Position above bottom_bar_ (bottom_bar_ min height 48 + padding)
+    lv_obj_align(notification_label_, LV_ALIGN_BOTTOM_MID, 0, -70);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
     low_battery_popup_ = lv_obj_create(screen);

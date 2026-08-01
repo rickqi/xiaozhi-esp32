@@ -25,6 +25,11 @@
 
 #define BOOT_BUTTON_GPIO        GPIO_NUM_0
 
+// SD card (TF) - SDMMC 1-bit
+#define SD_CARD_CLK_PIN    GPIO_NUM_38
+#define SD_CARD_CMD_PIN    GPIO_NUM_21
+#define SD_CARD_D0_PIN     GPIO_NUM_39
+
 
 #define RLCD_DC_PIN    GPIO_NUM_5  
 #define RLCD_CS_PIN    GPIO_NUM_40
