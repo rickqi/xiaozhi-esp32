@@ -109,9 +109,10 @@ CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=y
 
 ## 分区表
 
-使用 **v2 分区**（`partitions/v2/16m.csv`）：双 OTA 槽 `ota_0`/`ota_1`（各 ~4MB）+ `assets`（SPIFFS，8MB，唤醒词/字体/表情/音频）。
+使用 **v2 分区**（`partitions/v2/16m.csv`，v3.0.0 调整后）：双 OTA 槽 `ota_0`/`ota_1`（各 ~4.63MB）+ `assets`（SPIFFS，6.63MB，唤醒词/字体/表情/音频）。
 
-> v1 与 v2 **不兼容**，无法互相 OTA。`main/CMakeLists.txt` 末尾会自动检测 `assets` 分区并注册到 `idf.py flash`。
+> v1 与 v2 **不兼容**，无法互相 OTA。v3.0.0 调整了 OTA/assets 大小，v2.x 无法 OTA 到 v3.0.0，需 USB 烧录。
+> `main/CMakeLists.txt` 末尾会自动检测 `assets` 分区并注册到 `idf.py flash`。
 
 ---
 
