@@ -85,6 +85,10 @@ private:
     // Music playback state (MP3 from /sdcard/music)
     volatile bool music_playing_ = false;
     volatile bool music_stop_ = false;
+    // ChatLog playback state (chatlog WAV from /sdcard/logs/chatlogs)
+    volatile bool chatlog_playing_ = false;
+    volatile bool chatlog_stop_ = false;
+    int chatlog_channel_mode_ = 0;  // 0=mixed, 1=mic, 2=ai (set before spawning play task)
 
     void InitializeI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {};
@@ -851,6 +855,346 @@ private:
         return false;
     }
 
+    // ================= ChatLog management (list/summary/play/delete) =================
+    // Mirrors the recording management pattern above. ChatLog files live in
+    // /sdcard/logs/chatlogs/ as chat_<stamp>_<topic>.txt (JSONL transcript) +
+    // chat_<stamp>_<topic>.wav (24kHz/2ch/16bit PCM; ch0=mic, ch1=AI speaker).
+    // The WAV format is identical to recordings, so playback reuses the same
+    // codec->OutputData path; only the downmix differs (chatlog supports
+    // mixed/mic/ai channel selection).
+
+    // Build a full path under /sdcard/logs/chatlogs/<base>.<ext>. The caller
+    // may pass a filename WITH or WITHOUT extension; the .txt/.wav is replaced
+    // by <ext>. Keeps path operations DRY across list/summary/play/delete.
+    static void BuildChatlogPath(char *buf, size_t buf_size, const char *filename, const char *ext) {
+        // Strip any existing extension from filename to get the base name.
+        char base[160];
+        strncpy(base, filename, sizeof(base) - 1);
+        base[sizeof(base) - 1] = '\0';
+        char *dot = strrchr(base, '.');
+        if (dot) *dot = '\0';
+        snprintf(buf, buf_size, "/sdcard/logs/chatlogs/%.*s.%s",
+                 (int)(sizeof(base) - 1), base, ext);
+    }
+
+    // Derive a human-readable topic from a chatlog filename by extracting the
+    // suffix after the second underscore (chat_<stamp>_<topic>.txt -> <topic>).
+    // Returns "chat" if no topic suffix is present.
+    static std::string TopicFromChatlogName(const char *filename) {
+        const char *p = filename;
+        int underscores = 0;
+        for (; *p; p++) {
+            if (*p == '_') {
+                underscores++;
+                if (underscores == 2) { p++; break; }
+            }
+        }
+        if (underscores == 2 && *p) {
+            std::string topic(p);
+            size_t dot = topic.find_last_of('.');
+            if (dot != std::string::npos) topic = topic.substr(0, dot);
+            return topic;
+        }
+        return "chat";
+    }
+
+    // List chatlog .txt files to serial (mirrors ListRecordings). Reports the
+    // paired .wav size/duration when present.
+    void ListChatlogs() {
+        if (!InitializeSdCard()) {
+            printf("CHATLOGS: no SD card\n");
+            return;
+        }
+        DIR *dir = opendir("/sdcard/logs/chatlogs");
+        if (!dir) {
+            printf("CHATLOGS: no chatlogs dir\n");
+            return;
+        }
+        int count = 0;
+        struct dirent *ent;
+        printf("CHATLOGS_START\n");
+        while ((ent = readdir(dir)) != NULL) {
+            if (strncmp(ent->d_name, "chat_", 5) == 0 && strstr(ent->d_name, ".txt")) {
+                char txt_path[256];
+                BuildChatlogPath(txt_path, sizeof(txt_path), ent->d_name, "txt");
+                struct stat st;
+                long txt_size = 0;
+                if (stat(txt_path, &st) == 0) txt_size = st.st_size;
+                // Paired .wav size + duration
+                char wav_path[256];
+                BuildChatlogPath(wav_path, sizeof(wav_path), ent->d_name, "wav");
+                long wav_size = 0;
+                float dur = 0.0f;
+                if (stat(wav_path, &st) == 0) {
+                    wav_size = st.st_size;
+                    dur = (wav_size > 44) ? (float)(wav_size - 44) / (24000 * 2 * 2) : 0.0f;
+                }
+                printf("%s txt=%ldB wav=%ldB %.1fs\n", ent->d_name, txt_size, wav_size, dur);
+                count++;
+            }
+        }
+        closedir(dir);
+        printf("CHATLOGS_END (%d files)\n", count);
+        fflush(stdout);
+    }
+
+    // Build JSON list of chatlogs (newest first, max 10). Each entry reports the
+    // .txt name, txt_size, paired wav_size, duration_seconds, and started_at
+    // (parsed from the first JSONL line, which is the real start time -- the
+    // filename timestamp is the session END time due to RenameFilesWithTopic).
+    cJSON *ListChatlogsJson() {
+        cJSON *json = cJSON_CreateObject();
+        cJSON *files = cJSON_CreateArray();
+        if (!InitializeSdCard()) {
+            cJSON_AddStringToObject(json, "error", "no SD card");
+            cJSON_AddItemToObject(json, "chatlogs", files);
+            return json;
+        }
+        DIR *dir = opendir("/sdcard/logs/chatlogs");
+        if (!dir) {
+            cJSON_AddStringToObject(json, "error", "no chatlogs directory");
+            cJSON_AddItemToObject(json, "chatlogs", files);
+            return json;
+        }
+        struct {
+            char name[160];
+            long txt_size;
+            long wav_size;
+            float duration;
+            char started_at[24];
+        } list[20];
+        int count = 0;
+        struct dirent *ent;
+        while ((ent = readdir(dir)) != NULL && count < 20) {
+            if (strncmp(ent->d_name, "chat_", 5) == 0 && strstr(ent->d_name, ".txt")) {
+                char txt_path[256];
+                BuildChatlogPath(txt_path, sizeof(txt_path), ent->d_name, "txt");
+                struct stat st;
+                long txt_size = 0;
+                if (stat(txt_path, &st) == 0) txt_size = st.st_size;
+                char wav_path[256];
+                BuildChatlogPath(wav_path, sizeof(wav_path), ent->d_name, "wav");
+                long wav_size = 0;
+                float dur = 0.0f;
+                if (stat(wav_path, &st) == 0) {
+                    wav_size = st.st_size;
+                    dur = (wav_size > 44) ? (float)(wav_size - 44) / (24000 * 2 * 2) : 0.0f;
+                }
+                // Parse first JSONL line's "ts" for the real start time.
+                char started_at[24] = "";
+                FILE *tf = fopen(txt_path, "r");
+                if (tf) {
+                    char first_line[512];
+                    if (fgets(first_line, sizeof(first_line), tf)) {
+                        cJSON *line = cJSON_Parse(first_line);
+                        if (line) {
+                            cJSON *ts = cJSON_GetObjectItem(line, "ts");
+                            if (cJSON_IsString(ts)) {
+                                strncpy(started_at, ts->valuestring, sizeof(started_at) - 1);
+                            }
+                            cJSON_Delete(line);
+                        }
+                    }
+                    fclose(tf);
+                }
+                snprintf(list[count].name, sizeof(list[count].name), "%.*s",
+                         (int)sizeof(list[count].name) - 1, ent->d_name);
+                list[count].txt_size = txt_size;
+                list[count].wav_size = wav_size;
+                list[count].duration = dur;
+                snprintf(list[count].started_at, sizeof(list[count].started_at), "%s", started_at);
+                count++;
+            }
+        }
+        closedir(dir);
+        // Newest first (names sort chronologically by end-time stamp) -> reverse
+        int max_show = count < 10 ? count : 10;
+        for (int i = count - 1, j = 0; i >= 0 && j < max_show; i--, j++) {
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "name", list[i].name);
+            cJSON_AddStringToObject(item, "topic", TopicFromChatlogName(list[i].name).c_str());
+            cJSON_AddNumberToObject(item, "txt_size", list[i].txt_size);
+            cJSON_AddNumberToObject(item, "wav_size", list[i].wav_size);
+            cJSON_AddNumberToObject(item, "duration_seconds", list[i].duration);
+            if (list[i].started_at[0]) {
+                cJSON_AddStringToObject(item, "started_at", list[i].started_at);
+            }
+            cJSON_AddItemToArray(files, item);
+        }
+        cJSON_AddNumberToObject(json, "count", count);
+        cJSON_AddItemToObject(json, "chatlogs", files);
+        return json;
+    }
+
+    // Parse a chatlog .txt (JSONL) and return a JSON summary. Each line is
+    // {"ts","role","text"}. Caps at 50 turns to bound the response size. Lines
+    // that fail to parse (e.g. half-written on power loss) are skipped.
+    cJSON *GetChatlogSummaryJson(const char *filename) {
+        cJSON *json = cJSON_CreateObject();
+        cJSON *turns = cJSON_CreateArray();
+        if (!InitializeSdCard()) {
+            cJSON_AddStringToObject(json, "error", "no SD card");
+            cJSON_AddItemToObject(json, "turns", turns);
+            return json;
+        }
+        char txt_path[256];
+        BuildChatlogPath(txt_path, sizeof(txt_path), filename, "txt");
+        FILE *f = fopen(txt_path, "r");
+        if (!f) {
+            cJSON_AddStringToObject(json, "error", "file not found");
+            cJSON_AddItemToObject(json, "turns", turns);
+            return json;
+        }
+        cJSON_AddStringToObject(json, "filename", filename);
+        cJSON_AddStringToObject(json, "topic", TopicFromChatlogName(filename).c_str());
+        char line[1024];
+        int parsed = 0;
+        const int kMaxTurns = 50;
+        while (fgets(line, sizeof(line), f) != NULL && parsed < kMaxTurns) {
+            cJSON *obj = cJSON_Parse(line);
+            if (obj) {
+                cJSON *role = cJSON_GetObjectItem(obj, "role");
+                cJSON *text = cJSON_GetObjectItem(obj, "text");
+                cJSON *ts = cJSON_GetObjectItem(obj, "ts");
+                if (cJSON_IsString(role) && cJSON_IsString(text)) {
+                    cJSON *turn = cJSON_CreateObject();
+                    if (cJSON_IsString(ts)) {
+                        cJSON_AddStringToObject(turn, "ts", ts->valuestring);
+                    }
+                    cJSON_AddStringToObject(turn, "role", role->valuestring);
+                    cJSON_AddStringToObject(turn, "text", text->valuestring);
+                    cJSON_AddItemToArray(turns, turn);
+                    parsed++;
+                }
+                cJSON_Delete(obj);
+            }
+        }
+        fclose(f);
+        cJSON_AddNumberToObject(json, "turn_count", parsed);
+        if (parsed >= kMaxTurns) {
+            cJSON_AddBoolToObject(json, "truncated", true);
+        }
+        cJSON_AddItemToObject(json, "turns", turns);
+        return json;
+    }
+
+    // Play a chatlog WAV with a selectable channel mode. The chatlog WAV is
+    // 24kHz/2ch/16bit (identical to recordings). channel_mode:
+    //   0 = mixed: average both channels (mic + AI speaker) -> hear both sides
+    //   1 = mic:   channel 0 only (user's microphone)
+    //   2 = ai:    channel 1 only (AI speaker / AEC reference)
+    // Reuses the recording playback path (pause AI audio -> codec output ->
+    // stream -> resume). The play loop checks chatlog_stop_ so a future stop
+    // tool (or replay) can interrupt playback.
+    void PlayChatlogPath(const char *path, int channel_mode) {
+        auto& app = Application::GetInstance();
+        auto& audio = app.GetAudioService();
+        auto codec = Board::GetInstance().GetAudioCodec();
+
+        audio.Stop();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        codec->EnableOutput(true);
+        codec->EnableInput(false);
+
+        FILE *f = fopen(path, "rb");
+        if (!f) {
+            ESP_LOGE(TAG, "Chatlog playback: cannot open %s errno=%d", path, errno);
+            ShowNotify("Play Failed");
+            ResumeAudioService();
+            chatlog_playing_ = false;
+            return;
+        }
+        fseek(f, 0, SEEK_END);
+        long file_size = ftell(f);
+        fseek(f, 44, SEEK_SET);  // skip WAV header
+        long data_size = (file_size > 44) ? (file_size - 44) : 0;
+        const char *mode_name = (channel_mode == 1) ? "mic" : (channel_mode == 2) ? "ai" : "mixed";
+        ESP_LOGI(TAG, "Chatlog playback start: %s (%s, %ld bytes, %.1fs)",
+                 path, mode_name, file_size, (float)data_size / (24000 * 2 * 2));
+
+        std::vector<int16_t> stereo(1024 * 2);
+        std::vector<int16_t> mono(1024);
+        size_t n;
+        long played = 0;
+        int last_pct = -1;
+        ShowNotify("Playing... 0%");
+        while (chatlog_playing_ && (n = fread(stereo.data(), 1, stereo.size() * sizeof(int16_t), f)) > 0) {
+            size_t frames = n / (2 * sizeof(int16_t));
+            for (size_t i = 0; i < frames; i++) {
+                int16_t ch0 = stereo[i * 2];      // mic
+                int16_t ch1 = stereo[i * 2 + 1];  // AI speaker (AEC ref)
+                if (channel_mode == 1) {
+                    mono[i] = ch0;
+                } else if (channel_mode == 2) {
+                    mono[i] = ch1;
+                } else {
+                    mono[i] = (int16_t)(((int)ch0 + (int)ch1) / 2);
+                }
+            }
+            mono.resize(frames);
+            codec->OutputData(mono);
+            mono.resize(1024);
+            played += n;
+            int pct = (data_size > 0) ? (int)(played * 100 / data_size) : 100;
+            if (pct >= last_pct + 25) {
+                last_pct = (pct / 25) * 25;
+                char prog[48];
+                snprintf(prog, sizeof(prog), "Playing... %d%% (%s)", last_pct, mode_name);
+                ShowNotify(prog, 3000);
+                ESP_LOGI(TAG, "Chatlog playback progress: %d%%", last_pct);
+            }
+        }
+        fclose(f);
+        ESP_LOGI(TAG, "Chatlog playback done: %s (%ld bytes, stopped=%d)",
+                 path, played, (int)!chatlog_playing_);
+
+        codec->EnableOutput(false);
+        ResumeAudioService();
+        chatlog_playing_ = false;
+        ShowNotify("Play Done");
+    }
+
+    // Play a chatlog by filename. Resolves the paired .wav, guards against
+    // concurrent playback (music/chatlog), and spawns the play task.
+    // channel_mode: 0=mixed, 1=mic, 2=ai.
+    bool PlayChatlogByName(const char *filename, int channel_mode) {
+        if (!InitializeSdCard()) return false;
+        if (music_playing_ || chatlog_playing_) return false;
+        char wav_path[256];
+        BuildChatlogPath(wav_path, sizeof(wav_path), filename, "wav");
+        struct stat st;
+        if (stat(wav_path, &st) != 0) return false;  // paired .wav must exist
+        static char play_path[256];
+        strncpy(play_path, wav_path, sizeof(play_path) - 1);
+        play_path[sizeof(play_path) - 1] = '\0';
+        chatlog_playing_ = true;
+        chatlog_stop_ = false;
+        xTaskCreatePinnedToCore([](void *arg) {
+            auto board = (CustomBoard *)arg;
+            board->PlayChatlogPath(play_path, board->chatlog_channel_mode_);
+            vTaskDelete(NULL);
+        }, "chatlog_play", 8 * 1024, this, 3, NULL, 1);
+        return true;
+    }
+
+    // Delete a chatlog by .txt filename; also removes the paired .wav.
+    bool DeleteChatlogByName(const char *filename) {
+        if (!InitializeSdCard()) return false;
+        char txt_path[256], wav_path[256];
+        BuildChatlogPath(txt_path, sizeof(txt_path), filename, "txt");
+        BuildChatlogPath(wav_path, sizeof(wav_path), filename, "wav");
+        struct stat st;
+        if (stat(txt_path, &st) != 0) return false;  // .txt must exist
+        bool ok = (unlink(txt_path) == 0);
+        unlink(wav_path);  // best-effort .wav cleanup (ok if absent)
+        if (ok) {
+            ESP_LOGI(TAG, "Deleted chatlog: %s (+wav)", txt_path);
+            return true;
+        }
+        ESP_LOGE(TAG, "Chatlog delete failed %s errno=%d", txt_path, errno);
+        return false;
+    }
+
     // ================= Music playback (MP3/MP4/AAC from /sdcard/music) =================
     // Decodes via esp_audio_codec simple decoder, downmixes stereo->mono,
     // resamples to the codec rate (24kHz) with LinearResample, then feeds PCM to
@@ -1406,6 +1750,81 @@ private:
             [](const PropertyList&) -> ReturnValue {
                 return VersionInfo::BuildVersionInfoJson();
             });
+
+        // ================= ChatLog management (voice queryable) =================
+        // List recent chat conversation logs saved on the SD card.
+        mcp_server.AddTool("self.list_chatlogs",
+            "List the most recent chat conversation logs saved on the SD card.\n"
+            "Each entry includes the filename, topic, text/wav sizes, audio duration in seconds, "
+            "and the real start time of the conversation.\n"
+            "Returns up to 10 entries, newest first.\n"
+            "Use this tool when the user asks about recent conversations, chat history, "
+            "or what was talked about (e.g. \u201c最近聊了什么\u201d, \u201c聊天记录\u201d, \u201c对话历史\u201d).",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                return static_cast<cJSON*>(ListChatlogsJson());
+            });
+
+        // Get a text summary (transcript) of a specific chatlog.
+        mcp_server.AddTool("self.get_chatlog_summary",
+            "Get the text transcript of a specific chat conversation log.\n"
+            "Returns the conversation turns (timestamp, role: user/assistant, text), up to 50 turns.\n"
+            "The 'filename' parameter must be a filename from self.list_chatlogs results "
+            "(e.g. chat_20260802_143000_天气查询.txt).\n"
+            "Use this tool when the user asks what was said in a specific conversation "
+            "(e.g. \u201c那次对话说了什么\u201d, \u201c对话内容\u201d, \u201c聊天摘要\u201d).",
+            PropertyList({
+                Property("filename", kPropertyTypeString)
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                std::string filename = properties["filename"].value<std::string>();
+                return static_cast<cJSON*>(GetChatlogSummaryJson(filename.c_str()));
+            });
+
+        // Play the audio of a specific chatlog, with selectable channel mode.
+        mcp_server.AddTool("self.play_chatlog_audio",
+            "Play the audio recording of a specific chat conversation.\n"
+            "The 'filename' parameter must be a filename from self.list_chatlogs results.\n"
+            "The optional 'channel' parameter selects which side of the conversation to hear:\n"
+            "  - \"mixed\" (default): both sides averaged together\n"
+            "  - \"mic\": only the user's microphone\n"
+            "  - \"ai\": only the AI assistant's voice\n"
+            "Use this tool when the user asks to listen to a conversation recording "
+            "(e.g. \u201c听一下那段对话\u201d, \u201c播放录音\u201d, \u201c只听小智的声音\u201d).",
+            PropertyList({
+                Property("filename", kPropertyTypeString),
+                Property("channel", kPropertyTypeString, std::string("mixed"))
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                std::string filename = properties["filename"].value<std::string>();
+                std::string channel = properties["channel"].value<std::string>();
+                int mode = 0;  // mixed
+                if (channel == "mic") mode = 1;
+                else if (channel == "ai") mode = 2;
+                chatlog_channel_mode_ = mode;
+                if (PlayChatlogByName(filename.c_str(), mode)) {
+                    const char *mode_name = (mode == 1) ? "mic" : (mode == 2) ? "ai" : "mixed";
+                    return std::string("Playing chatlog: " + filename + " (" + mode_name + ")");
+                }
+                return std::string("Error: cannot play (file not found, or music/other playback in progress): " + filename);
+            });
+
+        // Delete a chatlog (both .txt transcript and paired .wav audio).
+        mcp_server.AddTool("self.delete_chatlog",
+            "Delete a specific chat conversation log, including its text transcript and audio file.\n"
+            "The 'filename' parameter must be a filename from self.list_chatlogs results.\n"
+            "Use this tool when the user asks to delete or remove a conversation record "
+            "(e.g. \u201c删掉那条对话\u201d, \u201c清除记录\u201d).",
+            PropertyList({
+                Property("filename", kPropertyTypeString)
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                std::string filename = properties["filename"].value<std::string>();
+                if (DeleteChatlogByName(filename.c_str())) {
+                    return std::string("Deleted chatlog: " + filename);
+                }
+                return std::string("Error: chatlog file not found or delete failed: " + filename);
+            });
     }
 
     void InitializeLcdDisplay() {
@@ -1547,6 +1966,9 @@ private:
                 } else if (strcmp(line, "CHATLOG") == 0) {
                     ESP_LOGI(TAG, "Chat log debug requested via serial");
                     Application::GetInstance().DebugChatLog();
+                } else if (strcmp(line, "CHATLOGLIST") == 0) {
+                    ESP_LOGI(TAG, "List chatlogs requested via serial");
+                    board->ListChatlogs();
                 } else if (strcmp(line, "MUSICLIST") == 0) {
                     ESP_LOGI(TAG, "List music requested via serial");
                     board->ListMusic();

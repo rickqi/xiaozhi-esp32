@@ -67,6 +67,10 @@ I (21836) waveshare_rlcd_4_2: SELFTEST SelfTest: 7/7 ALL PASS
 | `self.run_self_test` | 触发硬件自检 |
 | `self.get_self_test_result` | 获取上次自检 JSON 结果 |
 | `self.get_version_info` | 查询固件版本 / 构建信息 / 功能清单 / 烧录信息（语音可调用） |
+| `self.list_chatlogs` | 列出 SD 卡对话日志（最近 10 条，含主题/时长/开始时间） |
+| `self.get_chatlog_summary` | 获取指定对话的文本摘要（最多 50 轮） |
+| `self.play_chatlog_audio` | 播放指定对话音频（可选声道 mixed/mic/ai） |
+| `self.delete_chatlog` | 删除指定对话（.txt + .wav） |
 | `self.list_music` | 列出 SD 卡 `/sdcard/music/` 下 MP3 音乐 |
 | `self.play_music` | 播放指定 MP3（自动解码+重采样） |
 | `self.stop_music` | 停止音乐播放 |
@@ -96,6 +100,7 @@ I (21836) waveshare_rlcd_4_2: SELFTEST SelfTest: 7/7 ALL PASS
 | `MUSICPLAY <文件名>` | 播放指定 MP3（如 `MUSICPLAY song1.mp3`） |
 | `MUSICSTOP` | 停止音乐播放 |
 | `CHATLOG` | 触发模拟对话日志（验证 chatlogs 落盘） |
+| `CHATLOGLIST` | 列出 SD 卡对话日志（chatlogs 目录） |
 
 ### 5. 音乐播放（MP3）
 

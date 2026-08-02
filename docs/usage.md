@@ -86,6 +86,7 @@ idf.py -p COM4 flash
 | `MUSICPLAY <文件名>` | 播放指定 MP3 | `MUSIC: playing <文件名>` |
 | `MUSICSTOP` | 停止音乐播放 | — |
 | `CHATLOG` | 触发模拟对话日志（验证 chatlogs 落盘） | `ChatLog: ...` 日志 |
+| `CHATLOGLIST` | 列出 SD 卡对话日志（`/sdcard/logs/chatlogs/`） | `CHATLOGS_START ... CHATLOGS_END (N files)` |
 
 使用 `idf.py monitor` 或任意串口工具（115200）即可交互。
 
@@ -106,6 +107,10 @@ idf.py -p COM4 flash
 | `self.run_self_test` | — | 触发硬件自检 |
 | `self.get_self_test_result` | — | 获取最近一次自检结果（JSON） |
 | `self.get_version_info` | — | 获取固件版本、构建信息、功能清单、烧录信息（JSON） |
+| `self.list_chatlogs` | — | 列出 SD 卡 `/sdcard/logs/chatlogs/` 下最近 10 条对话记录 |
+| `self.get_chatlog_summary` | `filename` | 获取指定对话的文本摘要（最多 50 轮，JSON） |
+| `self.play_chatlog_audio` | `filename`, `channel`(可选 mixed/mic/ai) | 播放指定对话的音频（可选声道） |
+| `self.delete_chatlog` | `filename` | 删除指定对话（.txt + .wav） |
 | `self.list_music` | — | 列出 SD 卡 `/sdcard/music/` 下的 MP3 音乐 |
 | `self.play_music` | `filename` | 播放指定 MP3 音乐 |
 | `self.stop_music` | — | 停止当前音乐播放 |
@@ -120,6 +125,11 @@ idf.py -p COM4 flash
 - "放首歌听听" → `self.list_music` → `self.play_music("song1.mp3")`
 - "音乐停一下" → `self.stop_music`
 - "你的版本是多少？" / "你都有什么功能？" → `self.get_version_info`
+- "最近聊了什么？" / "对话历史" → `self.list_chatlogs`
+- "那次对话说了什么？" → `self.get_chatlog_summary("chat_..._天气查询.txt")`
+- "听一下那段对话录音" → `self.play_chatlog_audio("chat_..._天气查询.wav")`
+- "只听小智的声音" → `self.play_chatlog_audio(..., channel="ai")`
+- "删掉那条对话" → `self.delete_chatlog("chat_...txt")`
 
 ---
 
