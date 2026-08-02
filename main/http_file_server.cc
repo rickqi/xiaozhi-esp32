@@ -52,6 +52,9 @@ bool HttpFileServer::Start(uint16_t port) {
     config.max_uri_handlers = 8;
     config.max_open_sockets = 4;
     config.lru_purge_enable = true;  // close least-recent connection when full
+    config.stack_size = 8192;        // default 4096 too small for dir browse + file serve
+    config.recv_wait_timeout = 10;    // seconds (default 5)
+    config.send_wait_timeout = 30;   // seconds (default 5, too short for multi-MB files)
     config.uri_match_fn = httpd_uri_match_wildcard;  // enable wildcard URI matching
 
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -145,10 +148,12 @@ esp_err_t HttpFileServer::WildcardHandler(httpd_req_t *req) {
     // The URI starts with '/', so we prepend "/sdcard" directly.
     char sd_path[512];
     snprintf(sd_path, sizeof(sd_path), "/sdcard%.*s", (int)(sizeof(sd_path) - 8), uri);
+    ESP_LOGI(TAG, "Request: %s -> %s", uri, sd_path);
 
     // Is it a directory or a file?
     struct stat st;
     if (stat(sd_path, &st) != 0) {
+        ESP_LOGE(TAG, "stat failed: %s errno=%d", sd_path, errno);
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not found");
         return ESP_OK;
     }
@@ -268,8 +273,10 @@ void HttpFileServer::ServeDirectory(httpd_req_t *req, const char *sd_path, const
 // --- File download (streamed with PSRAM buffer) ---
 
 void HttpFileServer::ServeFile(httpd_req_t *req, const char *sd_path, const char *uri_path) {
+    ESP_LOGI(TAG, "ServeFile: opening %s", sd_path);
     FILE *fd = fopen(sd_path, "rb");
     if (!fd) {
+        ESP_LOGE(TAG, "ServeFile: fopen failed %s errno=%d", sd_path, errno);
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Cannot open file");
         return;
     }
@@ -278,6 +285,14 @@ void HttpFileServer::ServeFile(httpd_req_t *req, const char *sd_path, const char
     fseek(fd, 0, SEEK_END);
     long file_size = ftell(fd);
     fseek(fd, 0, SEEK_SET);
+    ESP_LOGI(TAG, "ServeFile: %s size=%ld bytes", sd_path, file_size);
+
+    // Set Content-Length so the browser can show total size + download progress.
+    // Without this, httpd defaults to chunked transfer encoding and the browser
+    // only shows bytes received so far.
+    char len_str[24];
+    snprintf(len_str, sizeof(len_str), "%ld", file_size);
+    httpd_resp_set_hdr(req, "Content-Length", len_str);
 
     // Set content type
     const char *ctype = GetContentType(uri_path);
@@ -297,27 +312,36 @@ void HttpFileServer::ServeFile(httpd_req_t *req, const char *sd_path, const char
     if (!scratch) {
         scratch = (char *)malloc(4096);
         if (!scratch) {
+            ESP_LOGE(TAG, "ServeFile: OOM for scratch buffer");
             fclose(fd);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
             return;
         }
         chunk_bufsize = 4096;
+        ESP_LOGW(TAG, "ServeFile: PSRAM alloc failed, using internal RAM 4KB");
     }
 
     size_t read_bytes;
     long total_sent = 0;
+    int chunk_count = 0;
     while ((read_bytes = fread(scratch, 1, chunk_bufsize, fd)) > 0) {
-        if (httpd_resp_send_chunk(req, scratch, read_bytes) != ESP_OK) {
-            ESP_LOGE(TAG, "File sending failed for %s", sd_path);
+        esp_err_t err = httpd_resp_send_chunk(req, scratch, read_bytes);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ServeFile: send_chunk failed at offset %ld, err=0x%x", total_sent, err);
             break;
         }
         total_sent += read_bytes;
+        chunk_count++;
+        if (chunk_count % 100 == 0) {
+            ESP_LOGI(TAG, "ServeFile: progress %ld/%ld (%d%%)", total_sent, file_size,
+                     (int)(file_size > 0 ? total_sent * 100 / file_size : 100));
+        }
     }
 
     fclose(fd);
     free(scratch);
     httpd_resp_send_chunk(req, NULL, 0);  // end response
-    ESP_LOGI(TAG, "Served %s (%ld bytes)", sd_path, total_sent);
+    ESP_LOGI(TAG, "Served %s (%ld/%ld bytes, %d chunks)", sd_path, total_sent, file_size, chunk_count);
 }
 
 // --- Content type by extension ---
