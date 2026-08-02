@@ -114,8 +114,8 @@ idf.py -p COM4 flash
 | `self.get_chatlog_summary` | `filename` | 获取指定对话的文本摘要（最多 50 轮，JSON） |
 | `self.play_chatlog_audio` | `filename`, `channel`(可选 mixed/mic/ai) | 播放指定对话的音频（可选声道） |
 | `self.delete_chatlog` | `filename` | 删除指定对话（.txt + .wav） |
-| `self.start_file_server` | — | 启动 WiFi HTTP 文件服务器（浏览器下载 SD 卡文件） |
-| `self.stop_file_server` | — | 停止 HTTP 文件服务器 |
+| `self.start_file_server` | — | 启动 WiFi HTTP 文件服务器（mDNS: xiaozhi.local，支持在线播放/查看/删除） |
+| `self.stop_file_server` | — | 停止 HTTP 文件服务器（或 10 分钟自动关闭） |
 | `self.list_music` | — | 列出 SD 卡 `/sdcard/music/` 下的 MP3 音乐 |
 | `self.play_music` | `filename` | 播放指定 MP3 音乐 |
 | `self.stop_music` | — | 停止当前音乐播放 |

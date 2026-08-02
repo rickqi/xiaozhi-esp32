@@ -6,6 +6,18 @@
 
 ---
 
+## v2.7.0 — 2026-08-02
+
+### feat
+- **mDNS 设备发现**：设备注册为 `xiaozhi.local`，手机直接访问 `http://xiaozhi.local/`（无需查 IP）
+- **WAV 在线播放**：目录列表对 .wav 文件显示内联 `<audio>` 播放器，浏览器直接播放录音/chatlog
+- **ChatLog 在线查看**：新增 `/view/<path>` 路由，解析 JSONL 渲染为聊天气泡 HTML（用户蓝/小智灰，最多 100 轮）
+- **文件删除**：目录列表每项加 🗑️ 按钮，JS fetch POST 删除后自动刷新
+- **HTTP 服务器自动关闭**：10 分钟无访问自动 Stop（释放 8KB 栈 + socket 资源）
+- 新增依赖 `espressif/mdns ^1.4.0`（自动下载 v1.11.3）
+
+---
+
 ## v2.6.1 — 2026-08-02
 
 ### fix

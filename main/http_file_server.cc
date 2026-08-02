@@ -3,12 +3,15 @@
 
 #include <esp_log.h>
 #include <esp_netif.h>
+#include <mdns.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <cstring>
 #include <cstdio>
+#include <unistd.h>
 #include <string>
 #include <vector>
+#include <cJSON.h>
 
 static const char *TAG = "HttpFileServer";
 
@@ -76,6 +79,20 @@ bool HttpFileServer::Start(uint16_t port) {
     status_uri.handler = StatusHandler;
     httpd_register_uri_handler(server_, &status_uri);
 
+    // Chatlog viewer route
+    httpd_uri_t view_uri = {};
+    view_uri.uri = "/view/*";
+    view_uri.method = HTTP_GET;
+    view_uri.handler = ViewHandler;
+    httpd_register_uri_handler(server_, &view_uri);
+
+    // File delete route (POST form)
+    httpd_uri_t delete_uri = {};
+    delete_uri.uri = "/delete";
+    delete_uri.method = HTTP_POST;
+    delete_uri.handler = DeleteHandler;
+    httpd_register_uri_handler(server_, &delete_uri);
+
     // Wildcard: match everything else for dir browsing / file download
     httpd_uri_t wild_uri = {};
     wild_uri.uri = "/*";
@@ -84,12 +101,36 @@ bool HttpFileServer::Start(uint16_t port) {
     httpd_register_uri_handler(server_, &wild_uri);
 
     port_ = port;
+    TouchAccess();
+
+    // Start mDNS (device discoverable as xiaozhi.local)
+    StartMdns();
+
+    // Start auto-close timer (stops server after 10 min of no access)
+    if (auto_close_timer_ == nullptr) {
+        esp_timer_create_args_t timer_args = {
+            .callback = AutoCloseCallback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "http_auto_close",
+            .skip_unhandled_events = false,
+        };
+        esp_timer_create(&timer_args, &auto_close_timer_);
+    }
+    esp_timer_start_periodic(auto_close_timer_, 60 * 1000000LL);  // check every 60s
+
     std::string url = GetUrl();
-    ESP_LOGI(TAG, "HTTP file server started: %s", url.c_str());
+    ESP_LOGI(TAG, "HTTP file server started: %s (also at http://xiaozhi.local:%u/)", url.c_str(), (unsigned)port_);
     return true;
 }
 
 void HttpFileServer::Stop() {
+    if (auto_close_timer_) {
+        esp_timer_stop(auto_close_timer_);
+        esp_timer_delete(auto_close_timer_);
+        auto_close_timer_ = nullptr;
+    }
+    StopMdns();
     if (server_) {
         httpd_stop(server_);
         server_ = nullptr;
@@ -97,9 +138,40 @@ void HttpFileServer::Stop() {
     }
 }
 
+// --- mDNS ---
+
+bool HttpFileServer::StartMdns() {
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS init failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    mdns_hostname_set("xiaozhi");
+    mdns_service_add("xiaozhi", "_http", "_tcp", port_, NULL, 0);
+    ESP_LOGI(TAG, "mDNS: xiaozhi.local registered");
+    return true;
+}
+
+void HttpFileServer::StopMdns() {
+    mdns_service_remove("_http", "_tcp");
+    mdns_free();
+}
+
+// --- Auto-close ---
+
+void HttpFileServer::AutoCloseCallback(void *arg) {
+    auto *self = static_cast<HttpFileServer *>(arg);
+    int64_t now = esp_timer_get_time();
+    if (now - self->last_access_us_ > AUTO_CLOSE_TIMEOUT_US) {
+        ESP_LOGI(TAG, "Auto-close: 10 min no access, stopping server");
+        self->Stop();
+    }
+}
+
 // --- Handlers ---
 
 esp_err_t HttpFileServer::IndexHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
     const char *html =
         "<html><head><meta charset=\"utf-8\"><title>小智 SD 卡文件</title>"
         "<style>body{font-family:sans-serif;margin:2em}a{display:block;padding:4px 0}"
@@ -117,6 +189,7 @@ esp_err_t HttpFileServer::IndexHandler(httpd_req_t *req) {
 }
 
 esp_err_t HttpFileServer::StatusHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
     std::string ip = GetDeviceIp();
     bool running = GetInstance().server_ != nullptr;
     char json[256];
@@ -130,7 +203,153 @@ esp_err_t HttpFileServer::StatusHandler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// --- Chatlog viewer (GET /view/<path>) ---
+
+esp_err_t HttpFileServer::ViewHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
+    // URI: /view/logs/chatlogs/chat_xxx.txt → SD path: /sdcard/logs/chatlogs/chat_xxx.txt
+    const char *uri = req->uri;
+    if (strlen(uri) <= 6) {  // "/view/"
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No file specified");
+        return ESP_OK;
+    }
+    // Skip "/view/" prefix (6 chars), remaining is the SD-relative path
+    const char *rel_path = uri + 6;
+    if (strstr(rel_path, "..") != nullptr) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Path traversal not allowed");
+        return ESP_OK;
+    }
+    char sd_path[512];
+    snprintf(sd_path, sizeof(sd_path), "/sdcard/%.*s", (int)(sizeof(sd_path) - 16), rel_path);
+    ServeChatlogView(req, sd_path);
+    return ESP_OK;
+}
+
+void HttpFileServer::ServeChatlogView(httpd_req_t *req, const char *sd_path) {
+    FILE *f = fopen(sd_path, "r");
+    if (!f) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Cannot open file");
+        return;
+    }
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_sendstr_chunk(req,
+        "<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>ChatLog Viewer</title>"
+        "<style>body{font-family:sans-serif;max-width:680px;margin:0 auto;padding:10px}"
+        ".msg{margin:6px 0;padding:8px 12px;border-radius:12px;max-width:80%;word-wrap:break-word}"
+        ".user{background:#0084ff;color:#fff;margin-left:auto}"
+        ".assistant{background:#e9e9eb;color:#000}"
+        ".ts{font-size:0.7em;color:#888;margin-bottom:2px}"
+        "h3{text-align:center;color:#666}</style></head><body>"
+        "<h3>ChatLog</h3>");
+
+    char line[2048];
+    int turns = 0;
+    while (fgets(line, sizeof(line), f) != NULL && turns < 100) {
+        cJSON *obj = cJSON_Parse(line);
+        if (obj) {
+            cJSON *ts = cJSON_GetObjectItem(obj, "ts");
+            cJSON *role = cJSON_GetObjectItem(obj, "role");
+            cJSON *text = cJSON_GetObjectItem(obj, "text");
+            if (cJSON_IsString(role) && cJSON_IsString(text)) {
+                const char *cls = (strcmp(role->valuestring, "user") == 0) ? "user" : "assistant";
+                const char *label = (strcmp(role->valuestring, "user") == 0) ? "我" : "小智";
+                // Build: <div class="msg <cls>"><div class="ts"><ts> <label></div><text></div>
+                httpd_resp_sendstr_chunk(req, "<div class=\"msg ");
+                httpd_resp_sendstr_chunk(req, cls);
+                httpd_resp_sendstr_chunk(req, "\"><div class=\"ts\">");
+                if (cJSON_IsString(ts)) httpd_resp_sendstr_chunk(req, ts->valuestring);
+                httpd_resp_sendstr_chunk(req, " ");
+                httpd_resp_sendstr_chunk(req, label);
+                httpd_resp_sendstr_chunk(req, "</div>");
+                httpd_resp_sendstr_chunk(req, text->valuestring);
+                httpd_resp_sendstr_chunk(req, "</div>");
+                turns++;
+            }
+            cJSON_Delete(obj);
+        }
+    }
+    fclose(f);
+
+    char footer[64];
+    snprintf(footer, sizeof(footer), "<hr><p>%d 轮对话</p></body></html>", turns);
+    httpd_resp_sendstr_chunk(req, footer);
+    httpd_resp_sendstr_chunk(req, NULL);
+    ESP_LOGI(TAG, "Chatlog view served: %s (%d turns)", sd_path, turns);
+}
+
+// --- File delete (POST /delete) ---
+
+esp_err_t HttpFileServer::DeleteHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
+    // Read POST body (expected: "path=<uri-encoded-path>")
+    char buf[512] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+        return ESP_OK;
+    }
+    // Parse "path=" prefix
+    const char *prefix = "path=";
+    int plen = strlen(prefix);
+    if (strncmp(buf, prefix, plen) != 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing path=");
+        return ESP_OK;
+    }
+    // URL-decode the path (simple: replace + with space, %xx decoding skipped for simplicity)
+    char *encoded = buf + plen;
+    for (char *p = encoded; *p; p++) { if (*p == '+') *p = ' '; }
+
+    // Prevent path traversal
+    if (strstr(encoded, "..") != nullptr) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Path traversal not allowed");
+        return ESP_OK;
+    }
+
+    // Build SD path and delete
+    char sd_path[512];
+    snprintf(sd_path, sizeof(sd_path), "/sdcard%.*s", (int)(sizeof(sd_path) - 8), encoded);
+
+    struct stat st;
+    bool is_dir = (stat(sd_path, &st) == 0 && S_ISDIR(st.st_mode));
+
+    int rc;
+    if (is_dir) {
+        rc = rmdir(sd_path);  // only works on empty dirs
+    } else {
+        rc = unlink(sd_path);
+    }
+
+    // Redirect back to the parent directory
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    if (rc == 0) {
+        // Find parent dir from encoded path
+        char parent[512];
+        strncpy(parent, encoded, sizeof(parent) - 1);
+        parent[sizeof(parent) - 1] = '\0';
+        char *last = strrchr(parent, '/');
+        if (last) last[1] = '\0';
+        else strcpy(parent, "/");
+
+        char redir[1200];
+        redir[0] = '\0';
+        strncat(redir, "<html><head><meta http-equiv=\"refresh\" content=\"0;url=", sizeof(redir) - 1);
+        strncat(redir, parent, sizeof(redir) - strlen(redir) - 1);
+        strncat(redir, "\"></head><body>Deleted. <a href=\"", sizeof(redir) - strlen(redir) - 1);
+        strncat(redir, parent, sizeof(redir) - strlen(redir) - 1);
+        strncat(redir, "\">Go back</a></body></html>", sizeof(redir) - strlen(redir) - 1);
+        httpd_resp_sendstr(req, redir);
+        ESP_LOGI(TAG, "Deleted: %s", sd_path);
+    } else {
+        httpd_resp_sendstr(req,
+            "<html><body>Delete failed. <a href=\"javascript:history.back()\">Go back</a></body></html>");
+        ESP_LOGE(TAG, "Delete failed: %s errno=%d", sd_path, errno);
+    }
+    return ESP_OK;
+}
+
 esp_err_t HttpFileServer::WildcardHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
     // req->uri is the path after the host, e.g. "/logs/chatlogs/chat_xxx.txt"
     const char *uri = req->uri;
     if (uri == nullptr || uri[0] != '/') {
@@ -235,37 +454,67 @@ void HttpFileServer::ServeDirectory(httpd_req_t *req, const char *sd_path, const
         }
         strncat(href, ent->d_name, sizeof(href) - strlen(href) - 1);
 
-        // Build entry HTML via strncat (avoids format-truncation warnings
-        // from snprintf with variable-length d_name/uri_path).
+        // Build entry HTML via strncat (avoids format-truncation warnings).
         char entry[1200];
         entry[0] = '\0';
         if (is_dir) {
-            strncat(entry, "<a href=\"", sizeof(entry) - strlen(entry) - 1);
+            strncat(entry, "<div><a href=\"", sizeof(entry) - strlen(entry) - 1);
             strncat(entry, href, sizeof(entry) - strlen(entry) - 1);
             strncat(entry, "/\">&#128193; ", sizeof(entry) - strlen(entry) - 1);
             strncat(entry, ent->d_name, sizeof(entry) - strlen(entry) - 1);
-            strncat(entry, "/</a>", sizeof(entry) - strlen(entry) - 1);
+            strncat(entry, "/</a></div>", sizeof(entry) - strlen(entry) - 1);
         } else {
             // Human-readable size
             char size_str[32];
             if (size < 1024) snprintf(size_str, sizeof(size_str), "%ld B", size);
             else if (size < 1048576) snprintf(size_str, sizeof(size_str), "%.1f KB", size / 1024.0);
             else snprintf(size_str, sizeof(size_str), "%.1f MB", size / 1048576.0);
-            strncat(entry, "<a href=\"", sizeof(entry) - strlen(entry) - 1);
+            // File link + size + delete button
+            strncat(entry, "<div><a href=\"", sizeof(entry) - strlen(entry) - 1);
             strncat(entry, href, sizeof(entry) - strlen(entry) - 1);
             strncat(entry, "\">&#128196; ", sizeof(entry) - strlen(entry) - 1);
             strncat(entry, ent->d_name, sizeof(entry) - strlen(entry) - 1);
             strncat(entry, "</a> <span class=\"size\">", sizeof(entry) - strlen(entry) - 1);
             strncat(entry, size_str, sizeof(entry) - strlen(entry) - 1);
             strncat(entry, "</span>", sizeof(entry) - strlen(entry) - 1);
+            // View link for .txt files (chatlog viewer)
+            const char *dot = strrchr(ent->d_name, '.');
+            if (dot && strcasecmp(dot, ".txt") == 0) {
+                strncat(entry, " <a href=\"/view/", sizeof(entry) - strlen(entry) - 1);
+                strncat(entry, href + 1, sizeof(entry) - strlen(entry) - 1);  // skip leading /
+                strncat(entry, "\">&#128221;查看</a>", sizeof(entry) - strlen(entry) - 1);
+            }
+            // Delete button
+            strncat(entry, " <button onclick=\"del('", sizeof(entry) - strlen(entry) - 1);
+            strncat(entry, href, sizeof(entry) - strlen(entry) - 1);
+            strncat(entry, "')\" style=\"border:none;background:none;cursor:pointer\">&#128465;</button></div>",
+                    sizeof(entry) - strlen(entry) - 1);
+            httpd_resp_sendstr_chunk(req, entry);
+            // Inline audio player for .wav files
+            if (dot && strcasecmp(dot, ".wav") == 0) {
+                char player[700];
+                player[0] = '\0';
+                strncat(player, "<audio controls preload=\"none\" src=\"", sizeof(player) - 1);
+                strncat(player, href, sizeof(player) - strlen(player) - 1);
+                strncat(player, "\" style=\"width:100%;max-width:320px;margin:2px 0 8px\"></audio>",
+                        sizeof(player) - strlen(player) - 1);
+                httpd_resp_sendstr_chunk(req, player);
+            }
+            count++;
+            continue;  // already sent entry above
         }
         httpd_resp_sendstr_chunk(req, entry);
         count++;
     }
     closedir(dir);
 
-    char footer[128];
-    snprintf(footer, sizeof(footer), "<hr><p>%d 个项目</p></body></html>", count);
+    char footer[256];
+    snprintf(footer, sizeof(footer),
+        "<hr><p>%d 个项目</p>"
+        "<script>function del(p){if(confirm('Delete '+p+'?')){"
+        "fetch('/delete',{method:'POST',body:'path='+encodeURIComponent(p)})"
+        ".then(()=>setTimeout(()=>location.reload(),500))}}"
+        "</script></body></html>", count);
     httpd_resp_sendstr_chunk(req, footer);
     httpd_resp_sendstr_chunk(req, NULL);  // end response
 }
