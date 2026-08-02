@@ -116,9 +116,10 @@ idf.py -p COM4 flash
 | `self.delete_chatlog` | `filename` | 删除指定对话（.txt + .wav） |
 | `self.start_file_server` | — | 启动 WiFi HTTP 文件服务器（mDNS: xiaozhi.local，支持在线播放/查看/删除） |
 | `self.stop_file_server` | — | 停止 HTTP 文件服务器（或 10 分钟自动关闭） |
+| `self.set_timer` | `duration_minutes`(1-1440), `message`(可选) | 设定倒计时定时器/闹钟，到时播放提示音 |
 | `self.list_music` | — | 列出 SD 卡 `/sdcard/music/` 下的 MP3 音乐 |
 
-> **HTTP 服务器页面功能**：文件浏览/下载、WAV 在线播放、ChatLog 聊天记录查看、文件删除、WiFi 配置热更新（`/wifi`）、OTA 在线固件升级（`/upload`）。访问 `http://xiaozhi.local/` 或设备 IP。
+> **HTTP 服务器页面功能**：文件浏览/下载、WAV 在线播放、ChatLog 聊天记录查看、文件删除、WiFi 配置热更新（`/wifi`）、OTA 在线固件升级（`/upload`）、传感器历史（`/sensors`）。访问 `http://xiaozhi.local/` 或设备 IP。
 | `self.play_music` | `filename` | 播放指定 MP3 音乐 |
 | `self.stop_music` | — | 停止当前音乐播放 |
 | `self.delete_music` | `filename` | 删除指定 MP3 音乐 |

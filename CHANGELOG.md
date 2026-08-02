@@ -6,6 +6,17 @@
 
 ---
 
+## v2.9.0 — 2026-08-02
+
+### feat
+- **传感器历史记录**：每 5 分钟自动采样温湿度/电量到 `/sdcard/sensors/sensor_log.csv`，HTTP `/sensors` 页面查看历史表格
+- **定时器/闹钟**：MCP 工具 `self.set_timer`（duration_minutes + message），到时播放提示音 + 通知
+
+### change
+- HTTP 下载 buffer 8KB → 16KB（吞吐量提升）
+
+---
+
 ## v2.8.0 — 2026-08-02
 
 ### feat

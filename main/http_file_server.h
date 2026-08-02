@@ -55,6 +55,7 @@ private:
     static esp_err_t OtaHandler(httpd_req_t *req);        // POST /ota (receive firmware, flash, reboot)
     static esp_err_t WifiHandler(httpd_req_t *req);       // GET /wifi (WiFi config form)
     static esp_err_t WifiSetHandler(httpd_req_t *req);    // POST /wifi_set (update WiFi config)
+    static esp_err_t SensorHandler(httpd_req_t *req);     // GET /sensors (sensor history table)
     static esp_err_t WildcardHandler(httpd_req_t *req);   // GET /* (dir browse / file download)
 
     // Helpers

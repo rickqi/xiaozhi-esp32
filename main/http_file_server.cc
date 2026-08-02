@@ -19,7 +19,7 @@
 static const char *TAG = "HttpFileServer";
 
 // PSRAM scratch buffer for file streaming (large for throughput)
-#define SCRATCH_BUFSIZE 8192
+#define SCRATCH_BUFSIZE 16384
 
 HttpFileServer &HttpFileServer::GetInstance() {
     static HttpFileServer instance;
@@ -122,6 +122,13 @@ bool HttpFileServer::Start(uint16_t port) {
     wifi_set.handler = WifiSetHandler;
     httpd_register_uri_handler(server_, &wifi_set);
 
+    // Sensor history route
+    httpd_uri_t sensor_uri = {};
+    sensor_uri.uri = "/sensors";
+    sensor_uri.method = HTTP_GET;
+    sensor_uri.handler = SensorHandler;
+    httpd_register_uri_handler(server_, &sensor_uri);
+
     // Wildcard: match everything else for dir browsing / file download
     httpd_uri_t wild_uri = {};
     wild_uri.uri = "/*";
@@ -213,6 +220,7 @@ esp_err_t HttpFileServer::IndexHandler(httpd_req_t *req) {
         "<hr>"
         "<p><a href=\"/wifi\">WiFi 配置</a></p>"
         "<p><a href=\"/upload\">固件升级 (OTA)</a></p>"
+        "<p><a href=\"/sensors\">传感器历史</a></p>"
         "<hr><a href=\"/status\">服务器状态</a>"
         "</body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -614,6 +622,58 @@ esp_err_t HttpFileServer::WifiSetHandler(httpd_req_t *req) {
         "<script>setTimeout(function(){location.href='/wifi';},10000);</script>"
         "</body></html>");
     ESP_LOGI(TAG, "WiFi config updated and reconnecting");
+    return ESP_OK;
+}
+
+// --- Sensor history ---
+
+esp_err_t HttpFileServer::SensorHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
+    FILE *f = fopen("/sdcard/sensors/sensor_log.csv", "r");
+    if (!f) {
+        httpd_resp_set_type(req, "text/html; charset=utf-8");
+        httpd_resp_sendstr(req,
+            "<html><body><h2>传感器历史</h2>"
+            "<p>暂无数据。传感器每 5 分钟采样一次，请稍后再查看。</p>"
+            "<p><a href=\"/\">返回</a></p></body></html>");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_sendstr_chunk(req,
+        "<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\">"
+        "<title>传感器历史</title>"
+        "<style>body{font-family:sans-serif;margin:1em}table{border-collapse:collapse;width:100%%}"
+        "th,td{border:1px solid #ddd;padding:4px 8px;text-align:center;font-size:14px}"
+        "th{background:#f5f5f5}</style></head><body>"
+        "<h2>传感器历史 <a href=\"/\" style=\"font-size:14px\">返回</a></h2>"
+        "<table><tr><th>时间</th><th>温度(°C)</th><th>湿度(%)</th><th>电量(%)</th><th>充电</th></tr>");
+
+    // Read last 100 lines (seek to end, count back)
+    char line[256];
+    char lines[100][256];
+    int count = 0;
+    while (fgets(line, sizeof(line), f) != NULL && count < 100) {
+        strncpy(lines[count], line, sizeof(lines[count]) - 1);
+        lines[count][sizeof(lines[count]) - 1] = '\0';
+        count++;
+    }
+    fclose(f);
+
+    // Output newest-first
+    for (int i = count - 1; i >= 0; i--) {
+        // Parse CSV: timestamp,temp,hum,bat,chg
+        char ts[32] = "", temp[16] = "", hum[16] = "", bat[16] = "", chg[8] = "";
+        sscanf(lines[i], "%31[^,],%15[^,],%15[^,],%15[^,],%7s", ts, temp, hum, bat, chg);
+        char row[400];
+        snprintf(row, sizeof(row),
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+            ts, temp, hum, bat, strcmp(chg, "1") == 0 ? "⚡" : "");
+        httpd_resp_sendstr_chunk(req, row);
+    }
+    char footer[64];
+    snprintf(footer, sizeof(footer), "</table><p>%d 条记录</p></body></html>", count);
+    httpd_resp_sendstr_chunk(req, footer);
+    httpd_resp_sendstr_chunk(req, NULL);
     return ESP_OK;
 }
 

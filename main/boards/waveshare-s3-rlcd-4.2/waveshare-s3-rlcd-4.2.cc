@@ -1962,6 +1962,36 @@ private:
                 }
                 return std::string("File server was not running");
             });
+
+        // Timer/alarm
+        mcp_server.AddTool("self.set_timer",
+            "Set a countdown timer. The device plays a sound and shows a notification when it expires.\n"
+            "duration_minutes: 1-1440 (default 5). message: shown when timer fires (default 'time is up').\n"
+            "Use when the user asks to set a timer, alarm, or reminder "
+            "(e.g. \u201c5分钟后提醒我\u201d, \u201c设个10分钟的闹钟\u201d).",
+            PropertyList({
+                Property("duration_minutes", kPropertyTypeInteger, 5, 1, 1440),
+                Property("message", kPropertyTypeString, std::string("时间到了"))
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                int mins = properties["duration_minutes"].value<int>();
+                std::string msg = properties["message"].value<std::string>();
+                if (user_timer_) {
+                    esp_timer_stop(user_timer_);
+                    esp_timer_delete(user_timer_);
+                    user_timer_ = nullptr;
+                }
+                snprintf(timer_message_, sizeof(timer_message_), "%s", msg.c_str());
+                esp_timer_create_args_t args = {};
+                args.callback = TimerCallback;
+                args.arg = this;
+                args.name = "user_timer";
+                esp_timer_create(&args, &user_timer_);
+                esp_timer_start_once(user_timer_, (int64_t)mins * 60 * 1000000LL);
+                char ret[160];
+                snprintf(ret, sizeof(ret), "Timer set for %d minutes: %s", mins, msg.c_str());
+                return std::string(ret);
+            });
     }
 
     void InitializeLcdDisplay() {
@@ -2181,6 +2211,43 @@ private:
         vTaskDelay(pdMS_TO_TICKS(500));
         board->DumpSdLog();
         vTaskDelete(NULL);
+    }
+
+    // ================= Sensor history logger =================
+    // Samples temperature/humidity/battery every 5 minutes to /sdcard/sensors/sensor_log.csv
+    static void SensorLogTask(void *arg) {
+        auto board = (CustomBoard *)arg;
+        vTaskDelay(pdMS_TO_TICKS(15000));  // wait for boot to settle
+        mkdir("/sdcard/sensors", 0755);
+        ESP_LOGI(TAG, "Sensor logger started (5 min interval)");
+        while (true) {
+            float temp = -999, hum = -999;
+            board->GetTemperatureHumidity(temp, hum);
+            int bat = 0; bool chg = false, dchg = false;
+            board->GetBatteryLevel(bat, chg, dchg);
+            time_t now = time(NULL);
+            struct tm tm;
+            localtime_r(&now, &tm);
+            char ts[24];
+            strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &tm);
+            FILE *f = fopen("/sdcard/sensors/sensor_log.csv", "a");
+            if (f) {
+                fprintf(f, "%s,%.1f,%.0f,%d,%d\n", ts, temp, hum, bat, chg ? 1 : 0);
+                fclose(f);
+            }
+            vTaskDelay(pdMS_TO_TICKS(300000));  // 5 minutes
+        }
+    }
+
+    // ================= Timer/Alarm =================
+    esp_timer_handle_t user_timer_ = nullptr;
+    char timer_message_[128] = "";
+    static void TimerCallback(void *arg) {
+        auto board = (CustomBoard *)arg;
+        Application::GetInstance().PlaySound(Lang::Sounds::OGG_POPUP);
+        auto display = Board::GetInstance().GetDisplay();
+        if (display) display->ShowNotification(board->timer_message_, 10000);
+        ESP_LOGI(TAG, "Timer fired: %s", board->timer_message_);
     }
 
     // ================= Self-test (自检) =================
@@ -2445,6 +2512,7 @@ public:
         InitializeSdLog();      // mount SD + tee logs to /sdcard/logs/
         xTaskCreatePinnedToCore(ScreenshotCmdTask, "scr_cmd", 6 * 1024, this, 1, NULL, 1);
         xTaskCreatePinnedToCore(AutoScreenshotTask, "scr_auto", 6 * 1024, this, 1, NULL, 1);
+        xTaskCreatePinnedToCore(SensorLogTask, "sensor_log", 4 * 1024, this, 1, NULL, 1);
 #if defined(RLCD_ENABLE_KEY_LEVEL_MONITOR) && RLCD_ENABLE_KEY_LEVEL_MONITOR
         xTaskCreatePinnedToCore(KeyLevelMonitorTask, "key_mon", 2 * 1024, this, 1, NULL, 1);
 #endif
