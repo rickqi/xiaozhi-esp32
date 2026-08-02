@@ -268,6 +268,18 @@ private:
             ToggleRecording();
         });
 
+        // BOOT triple click: show firmware version info + button guide
+        boot_button_.OnMultipleClick([this]() {
+            ESP_LOGI(TAG, "BOOT triple click: show version info");
+            auto display = Board::GetInstance().GetDisplay();
+            if (display == nullptr) return;
+            // Version line
+            std::string info = VersionInfo::GetVersionString();
+            // Button guide (compact)
+            info += "\nBOOT: 1=聊天 2=录音 3=版本 长=截图\nKEY: 1=静音 2=提示音 3=录音 长=系统信息";
+            display->ShowNotification(info.c_str(), 8000);
+        }, 3);
+
         // KEY triple click: play latest recording (spawn dedicated task to avoid blocking button context)
         key_button_.OnMultipleClick([this]() {
             ESP_LOGI(TAG, "KEY triple click: play latest recording");
