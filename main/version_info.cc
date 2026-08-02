@@ -22,6 +22,7 @@ static const char* kFeatures[] = {
     "对话日志 ChatLog：AI 对话文本+语音自动保存到 SD 卡",
     "ChatLog 管理：语音查询对话历史/摘要/播放/删除，支持声道切换",
     "日志查询：语音列出对话日志与系统日志（ESP_LOG tee）",
+    "BOOT 三击全屏版本信息：版本号+变更摘要+按键说明（14px字体，15秒）",
     "传感器历史：每5分钟自动采样温湿度/电量到SD卡，HTTP页面查看趋势",
     "定时器/闹钟：语音设定倒计时提醒，到时播放提示音",
     "WiFi HTTP 文件服务器：mDNS(xiaozhi.local)、在线播放 WAV、ChatLog 查看、文件删除、WiFi 热更新、OTA 在线升级、10分钟自动关闭",
