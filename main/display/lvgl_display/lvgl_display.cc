@@ -24,6 +24,11 @@ LvglDisplay::LvglDisplay() {
             // Only hide the notification; status_label_ visibility is controlled
             // by SetStatus / LcdDisplay::UpdateStatusBar cycling logic to avoid overlap
             lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
+            // Restore default font if it was changed (e.g. by SetNotificationFont)
+            if (display->default_notification_font_) {
+                lv_obj_set_style_text_font(display->notification_label_,
+                                           display->default_notification_font_, 0);
+            }
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
@@ -82,6 +87,13 @@ void LvglDisplay::SetStatus(const char* status) {
     last_status_update_time_ = std::chrono::system_clock::now();
 }
 
+void LvglDisplay::SetNotificationFont(const lv_font_t *font) {
+    DisplayLockGuard lock(this);
+    if (notification_label_ != nullptr && font != nullptr) {
+        lv_obj_set_style_text_font(notification_label_, font, 0);
+    }
+}
+
 void LvglDisplay::ShowNotification(const std::string &notification, int duration_ms) {
     ShowNotification(notification.c_str(), duration_ms);
 }
@@ -90,6 +102,10 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
     DisplayLockGuard lock(this);
     if (notification_label_ == nullptr) {
         return;
+    }
+    // Save default font on first call (after SetupUI has set it)
+    if (default_notification_font_ == nullptr) {
+        default_notification_font_ = lv_obj_get_style_text_font(notification_label_, 0);
     }
     lv_label_set_text(notification_label_, notification);
     lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);

@@ -20,6 +20,9 @@ public:
     virtual void SetStatus(const char* status);
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
     virtual void ShowNotification(const std::string &notification, int duration_ms = 3000);
+    // Temporarily change the notification label font (e.g. for dense info display).
+    // Call before ShowNotification; the font persists until the next call.
+    void SetNotificationFont(const lv_font_t *font);
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image);
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
@@ -43,6 +46,7 @@ protected:
 
     std::chrono::system_clock::time_point last_status_update_time_;
     esp_timer_handle_t notification_timer_ = nullptr;
+    const lv_font_t *default_notification_font_ = nullptr;  // saved on first ShowNotification
 
     friend class DisplayLockGuard;
     virtual bool Lock(int timeout_ms = 0) = 0;

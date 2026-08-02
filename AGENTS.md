@@ -76,12 +76,13 @@ s.write(b'CHATLOGLIST\n'); s.flush(); time.sleep(3); print(s.read(4096).decode('
 
 **每次版本 bump 必须同步更新以下内容**（缺一不可）：
 
-1. **`CHANGELOG.md`**：在该文件顶部（最新版本）增加本次变更条目，按 `feat` / `fix` / `change` 分类，简述改了什么
+1. **`CHANGELOG.md`**：在该文件顶部（最新版本）增加本次变更条目，按 `feat` / `fix` / `change` 分类，简述改了什么。**必须包含本次版本的具体变更说明，不能只写"本次"或笼统描述。**
 2. **`main/version_info.cc` 的 `kFeatures[]`**：如果新增/删除/变更了功能，同步更新功能清单数组（语音查询 `self.get_version_info` 时播报的就是这个数组）
 3. **版本号**：`CMakeLists.txt:7` 的 `set(PROJECT_VER "...")`
 4. **文档**：`docs/usage.md` 和板 `README.md` 中受影响的 MCP 工具表 / 串口命令表 / 功能说明
 
 > 纯文档提交（如 AGENTS.md、分析报告）**不需要 bump 版本**，也无需更新 CHANGELOG。
+> v3.0.0 起，分区表调整属于 major bump，需 USB 烧录（`idf.py erase-otadata && idf.py flash`）。
 
 ---
 

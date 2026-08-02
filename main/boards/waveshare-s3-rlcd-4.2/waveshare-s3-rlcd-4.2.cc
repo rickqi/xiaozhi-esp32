@@ -1,4 +1,6 @@
 #include <esp_lcd_panel_vendor.h>
+#include <esp_app_desc.h>
+#include <lvgl.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <esp_adc/adc_oneshot.h>
@@ -205,6 +207,7 @@ private:
 
     void InitializeButtons() { 
         boot_button_.OnClick([this]() {
+            ESP_LOGI(TAG, "BOOT click: toggle chat state");
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
@@ -268,16 +271,12 @@ private:
             ToggleRecording();
         });
 
-        // BOOT triple click: show firmware version info + button guide
+        // BOOT triple click: show firmware version info as a full-screen overlay
+        // (covers emoji/status/chat to avoid overlap; centered; 14px font; 15s auto-dismiss)
+        LV_FONT_DECLARE(font_puhui_basic_14_1);
         boot_button_.OnMultipleClick([this]() {
             ESP_LOGI(TAG, "BOOT triple click: show version info");
-            auto display = Board::GetInstance().GetDisplay();
-            if (display == nullptr) return;
-            // Version line
-            std::string info = VersionInfo::GetVersionString();
-            // Button guide (compact)
-            info += "\nBOOT: 1=聊天 2=录音 3=版本 长=截图\nKEY: 1=静音 2=提示音 3=录音 长=系统信息";
-            display->ShowNotification(info.c_str(), 8000);
+            ShowVersionPopup();
         }, 3);
 
         // KEY triple click: play latest recording (spawn dedicated task to avoid blocking button context)
@@ -2242,6 +2241,94 @@ private:
     // ================= Timer/Alarm =================
     esp_timer_handle_t user_timer_ = nullptr;
     char timer_message_[128] = "";
+
+    // ================= Version info popup =================
+    lv_obj_t *version_popup_ = nullptr;
+    esp_timer_handle_t version_popup_timer_ = nullptr;
+
+    static void VersionPopupTimerCb(void *arg) {
+        auto board = (CustomBoard *)arg;
+        auto display = Board::GetInstance().GetDisplay();
+        if (!display) return;
+        DisplayLockGuard lock(display);
+        if (board->version_popup_) {
+            lv_obj_del(board->version_popup_);
+            board->version_popup_ = nullptr;
+        }
+    }
+
+    void ShowVersionPopup() {
+        auto display = Board::GetInstance().GetDisplay();
+        if (!display) return;
+
+        // Delete existing popup if shown
+        if (version_popup_) {
+            DisplayLockGuard lock(display);
+            if (version_popup_) {
+                lv_obj_del(version_popup_);
+                version_popup_ = nullptr;
+            }
+        }
+
+        // Build version info text
+        auto app_desc = esp_app_get_description();
+        char info[512];
+        snprintf(info, sizeof(info),
+            "小智 AI 固件 v%s\n"
+            "构建: %s %s\n"
+            "git: %s  ESP-IDF: %s\n"
+            "\n"
+            "近期版本更新:\n"
+            "v3.0.0 分区扩大(OTA 4.6MB)\n"
+            "v2.9.0 传感器历史·定时闹钟\n"
+            "v2.8.0 WiFi热更新·OTA在线升级\n"
+            "v2.7.0 mDNS·WAV播放·ChatLog查看\n"
+            "v2.5.0 HTTP文件服务器\n"
+            "\n"
+            "按键说明:\n"
+            "BOOT: 单击=聊天 双击=录音\n"
+            "      三击=版本 长按=截图\n"
+            "KEY: 单击=静音 双击=提示音\n"
+            "     三击=录音 长按=信息",
+            app_desc->version, app_desc->date, app_desc->time,
+            GIT_COMMIT, app_desc->idf_ver);
+
+        // Create full-screen overlay
+        extern const lv_font_t font_puhui_basic_14_1;
+        DisplayLockGuard lock(display);
+        auto screen = lv_screen_active();
+        version_popup_ = lv_obj_create(screen);
+        lv_obj_set_size(version_popup_, LV_HOR_RES, LV_VER_RES);
+        lv_obj_align(version_popup_, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_bg_color(version_popup_, lv_color_white(), 0);
+        lv_obj_set_style_bg_opa(version_popup_, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(version_popup_, 0, 0);
+        lv_obj_set_style_pad_all(version_popup_, 10, 0);
+        lv_obj_set_style_radius(version_popup_, 0, 0);
+        lv_obj_set_scrollbar_mode(version_popup_, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_clear_flag(version_popup_, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *label = lv_label_create(version_popup_);
+        lv_obj_set_width(label, LV_HOR_RES - 20);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(label, &font_puhui_basic_14_1, 0);
+        lv_obj_set_style_text_color(label, lv_color_black(), 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 0);
+        lv_label_set_text(label, info);
+
+        // Auto-dismiss timer
+        if (!version_popup_timer_) {
+            esp_timer_create_args_t args = {};
+            args.callback = VersionPopupTimerCb;
+            args.arg = this;
+            args.name = "ver_popup";
+            esp_timer_create(&args, &version_popup_timer_);
+        }
+        esp_timer_stop(version_popup_timer_);
+        esp_timer_start_once(version_popup_timer_, 15 * 1000000LL);
+    }
+
     static void TimerCallback(void *arg) {
         auto board = (CustomBoard *)arg;
         Application::GetInstance().PlaySound(Lang::Sounds::OGG_POPUP);

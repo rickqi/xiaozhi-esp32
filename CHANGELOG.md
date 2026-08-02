@@ -6,7 +6,7 @@
 
 ---
 
-## v3.0.0 — 2026-08-02 ⚠️ MAJOR（分区变更，需 USB 烧录）
+## v3.0.0 — 2026-08-03 ⚠️ MAJOR（分区变更，需 USB 烧录）
 
 ### change
 - **分区表调整**：OTA 槽 3.94MB → 4.63MB（+696KB/槽），Assets 8MB → 6.63MB（-1.37MB，仍剩 4MB）
@@ -14,16 +14,17 @@
   - assets: 偏移 `0x800000` → `0x960000`，大小 `8M` → `0x6A0000`
 - **不兼容 OTA**：v2.x 无法 OTA 到 v3.0.0（分区地址变了），**必须通过 USB 烧录**
 
+### feat
+- **BOOT 三击版本信息全屏弹窗**：14px 小字体、白底黑字全屏覆盖（不与表情/状态栏重叠）、居中显示版本号+git 提交+近期变更摘要+按键说明，15 秒自动消失
+- **LvglDisplay::SetNotificationFont()**：支持动态切换通知字体
+- **BOOT 单击日志补齐**：所有 8 项按键手势现在都有 ESP_LOGI 输出
+
 ### 烧录步骤
 ```powershell
-# 1. 擦除 otadata（清除旧分区指针，保留 WiFi 密码）
 & C:\Users\szk220009\esp\esp-idf\export.ps1
 idf.py -p COM4 erase-otadata
-
-# 2. 烧录新固件 + 分区表 + assets
 idf.py -p COM4 flash
 ```
-> 如遇异常，执行 `idf.py -p COM4 erase-flash && idf.py -p COM4 flash`（全擦，WiFi 需重配）
 
 ---
 
