@@ -6,6 +6,15 @@
 
 ---
 
+## v2.8.0 — 2026-08-02
+
+### feat
+- **WiFi 配置热更新**：HTTP 页面 `/wifi` 修改 WiFi SSID/密码，提交后自动断开重连（使用 SsidManager 持久化到 NVS）
+- **OTA 在线固件升级**：HTTP 页面 `/upload` 上传 .bin 固件文件，设备自动写入备用 OTA 槽并重启（`esp_ota_*` API 流式写入，PSRAM 缓冲，进度日志）
+- 首页增加 WiFi 配置和固件升级入口
+
+---
+
 ## v2.7.0 — 2026-08-02
 
 ### feat

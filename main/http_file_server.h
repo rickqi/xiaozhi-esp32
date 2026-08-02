@@ -51,6 +51,10 @@ private:
     static esp_err_t StatusHandler(httpd_req_t *req);     // GET /status
     static esp_err_t ViewHandler(httpd_req_t *req);       // GET /view/* (chatlog viewer)
     static esp_err_t DeleteHandler(httpd_req_t *req);     // POST /delete
+    static esp_err_t UploadHandler(httpd_req_t *req);     // GET /upload (OTA upload form)
+    static esp_err_t OtaHandler(httpd_req_t *req);        // POST /ota (receive firmware, flash, reboot)
+    static esp_err_t WifiHandler(httpd_req_t *req);       // GET /wifi (WiFi config form)
+    static esp_err_t WifiSetHandler(httpd_req_t *req);    // POST /wifi_set (update WiFi config)
     static esp_err_t WildcardHandler(httpd_req_t *req);   // GET /* (dir browse / file download)
 
     // Helpers

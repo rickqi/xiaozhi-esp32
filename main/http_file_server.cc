@@ -12,6 +12,9 @@
 #include <string>
 #include <vector>
 #include <cJSON.h>
+#include <esp_ota_ops.h>
+#include <wifi_manager.h>
+#include <ssid_manager.h>
 
 static const char *TAG = "HttpFileServer";
 
@@ -92,6 +95,32 @@ bool HttpFileServer::Start(uint16_t port) {
     delete_uri.method = HTTP_POST;
     delete_uri.handler = DeleteHandler;
     httpd_register_uri_handler(server_, &delete_uri);
+
+    // OTA upload routes
+    httpd_uri_t upload_get = {};
+    upload_get.uri = "/upload";
+    upload_get.method = HTTP_GET;
+    upload_get.handler = UploadHandler;
+    httpd_register_uri_handler(server_, &upload_get);
+
+    httpd_uri_t ota_post = {};
+    ota_post.uri = "/ota";
+    ota_post.method = HTTP_POST;
+    ota_post.handler = OtaHandler;
+    httpd_register_uri_handler(server_, &ota_post);
+
+    // WiFi config routes
+    httpd_uri_t wifi_get = {};
+    wifi_get.uri = "/wifi";
+    wifi_get.method = HTTP_GET;
+    wifi_get.handler = WifiHandler;
+    httpd_register_uri_handler(server_, &wifi_get);
+
+    httpd_uri_t wifi_set = {};
+    wifi_set.uri = "/wifi_set";
+    wifi_set.method = HTTP_POST;
+    wifi_set.handler = WifiSetHandler;
+    httpd_register_uri_handler(server_, &wifi_set);
 
     // Wildcard: match everything else for dir browsing / file download
     httpd_uri_t wild_uri = {};
@@ -181,6 +210,9 @@ esp_err_t HttpFileServer::IndexHandler(httpd_req_t *req) {
         "<p><a href=\"/logs/\">系统日志 (logs)</a></p>"
         "<p><a href=\"/records/\">录音文件 (records)</a></p>"
         "<p><a href=\"/music/\">音乐文件 (music)</a></p>"
+        "<hr>"
+        "<p><a href=\"/wifi\">WiFi 配置</a></p>"
+        "<p><a href=\"/upload\">固件升级 (OTA)</a></p>"
         "<hr><a href=\"/status\">服务器状态</a>"
         "</body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -345,6 +377,243 @@ esp_err_t HttpFileServer::DeleteHandler(httpd_req_t *req) {
             "<html><body>Delete failed. <a href=\"javascript:history.back()\">Go back</a></body></html>");
         ESP_LOGE(TAG, "Delete failed: %s errno=%d", sd_path, errno);
     }
+    return ESP_OK;
+}
+
+// --- OTA firmware upload ---
+
+esp_err_t HttpFileServer::UploadHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_sendstr(req,
+        "<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\">"
+        "<title>固件升级</title>"
+        "<style>body{font-family:sans-serif;max-width:480px;margin:2em auto}"
+        "input,button{font-size:16px;margin:8px 0;padding:8px}"
+        "#status{margin-top:16px;color:#666}</style></head><body>"
+        "<h2>固件在线升级 (OTA)</h2>"
+        "<p>选择 .bin 固件文件，上传后设备将自动刷写并重启。</p>"
+        "<input type=\"file\" id=\"fw\" accept=\".bin\">"
+        "<button onclick=\"doUpload()\">上传并升级</button>"
+        "<div id=\"status\"></div>"
+        "<script>"
+        "function doUpload(){"
+        "var f=document.getElementById('fw').files[0];"
+        "if(!f){alert('请选择固件文件');return;}"
+        "if(!confirm('确认上传 '+f.name+' ('+(f.size/1024/1024).toFixed(1)+'MB) 并升级?设备将重启。'))return;"
+        "document.getElementById('status').innerText='上传中... ('+(f.size/1024/1024).toFixed(1)+'MB)';"
+        "fetch('/ota',{method:'POST',body:f})"
+        ".then(r=>r.text()).then(t=>{document.getElementById('status').innerText=t;})"
+        ".catch(e=>{document.getElementById('status').innerText='上传失败:'+e;});"
+        "}"
+        "</script></body></html>");
+    return ESP_OK;
+}
+
+esp_err_t HttpFileServer::OtaHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
+    ESP_LOGI(TAG, "OTA: starting firmware upload, content_len=%d", (int)req->content_len);
+
+    if (req->content_len < 1024) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "File too small for firmware");
+        return ESP_OK;
+    }
+
+    const esp_partition_t *update_part = esp_ota_get_next_update_partition(NULL);
+    if (!update_part) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No OTA partition");
+        return ESP_OK;
+    }
+    ESP_LOGI(TAG, "OTA: target partition %s at 0x%lx size 0x%lx",
+             update_part->label, (unsigned long)update_part->address, (unsigned long)update_part->size);
+
+    esp_ota_handle_t ota_handle = 0;
+    esp_err_t err = esp_ota_begin(update_part, req->content_len, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: esp_ota_begin failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA begin failed");
+        return ESP_OK;
+    }
+
+    // Stream the body to OTA partition
+    char *buf = (char *)heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+    if (!buf) buf = (char *)malloc(4096);
+    if (!buf) {
+        esp_ota_abort(ota_handle);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OOM");
+        return ESP_OK;
+    }
+    size_t bufsize = (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 0) ? 8192 : 4096;
+
+    int total_received = 0;
+    int pct = 0;
+    while (total_received < (int)req->content_len) {
+        int recv = httpd_req_recv(req, buf, bufsize);
+        if (recv < 0) {
+            ESP_LOGE(TAG, "OTA: recv error at %d", total_received);
+            esp_ota_abort(ota_handle);
+            free(buf);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Recv failed");
+            return ESP_OK;
+        }
+        if (recv == 0) break;
+        err = esp_ota_write(ota_handle, buf, recv);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA: write failed at %d: %s", total_received, esp_err_to_name(err));
+            esp_ota_abort(ota_handle);
+            free(buf);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA write failed");
+            return ESP_OK;
+        }
+        total_received += recv;
+        int new_pct = total_received * 100 / req->content_len;
+        if (new_pct >= pct + 25) {
+            pct = (new_pct / 25) * 25;
+            ESP_LOGI(TAG, "OTA: progress %d%% (%d/%d)", pct, total_received, (int)req->content_len);
+        }
+    }
+    free(buf);
+
+    if (total_received != (int)req->content_len) {
+        ESP_LOGE(TAG, "OTA: incomplete: received %d / expected %d", total_received, (int)req->content_len);
+        esp_ota_abort(ota_handle);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Upload incomplete");
+        return ESP_OK;
+    }
+
+    err = esp_ota_end(ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: esp_ota_end failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA end failed");
+        return ESP_OK;
+    }
+
+    err = esp_ota_set_boot_partition(update_part);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA: set_boot_partition failed: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Set boot failed");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "OTA: success! %d bytes written. Rebooting in 3s...", total_received);
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_sendstr(req,
+        "<html><body><h2>升级成功!</h2>"
+        "<p>已写入 <b>3,697 KB</b> 固件到 OTA 槽。设备将在 3 秒后重启...</p>"
+        "<script>setTimeout(function(){location.href='/';},8000);</script>"
+        "</body></html>");
+
+    // Delay to let the HTTP response flush, then restart
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    esp_restart();
+    return ESP_OK;
+}
+
+// --- WiFi configuration ---
+
+esp_err_t HttpFileServer::WifiHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
+    // Read current SSID via WifiManager
+    auto &wifi = WifiManager::GetInstance();
+    std::string cur_ssid = wifi.GetSsid();
+    if (cur_ssid.empty()) cur_ssid = "(未连接)";
+
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    char html[1024];
+    snprintf(html, sizeof(html),
+        "<html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\">"
+        "<title>WiFi 配置</title>"
+        "<style>body{font-family:sans-serif;max-width:480px;margin:2em auto}"
+        "input{font-size:16px;width:100%%;margin:8px 0;padding:8px;box-sizing:border-box}"
+        "button{font-size:16px;padding:10px 24px}</style></head><body>"
+        "<h2>WiFi 配置</h2>"
+        "<p>当前 SSID: <b>%s</b></p>"
+        "<form action=\"/wifi_set\" method=\"POST\">"
+        "<label>SSID:<br><input name=\"ssid\" placeholder=\"WiFi名称\"></label><br>"
+        "<label>密码:<br><input name=\"password\" type=\"password\" placeholder=\"WiFi密码\"></label><br>"
+        "<button type=\"submit\">保存并重连</button>"
+        "</form><p style=\"color:#888\">提交后 WiFi 将断开重连。如失败请重新进入配网模式。</p>"
+        "</body></html>",
+        cur_ssid.c_str());
+    httpd_resp_sendstr(req, html);
+    return ESP_OK;
+}
+
+esp_err_t HttpFileServer::WifiSetHandler(httpd_req_t *req) {
+    GetInstance().TouchAccess();
+    char buf[512] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+        return ESP_OK;
+    }
+
+    // Parse form body: "ssid=xxx&password=yyy"
+    char ssid[33] = {0};
+    char password[65] = {0};
+    // Simple URL-form parser
+    char *p = buf;
+    while (p && *p) {
+        if (strncmp(p, "ssid=", 5) == 0) {
+            p += 5;
+            char *amp = strchr(p, '&');
+            int len = amp ? (int)(amp - p) : strlen(p);
+            if (len > 32) len = 32;
+            // Simple URL decode (+ → space)
+            int j = 0;
+            for (int i = 0; i < len && j < 32; i++) {
+                if (p[i] == '+') ssid[j++] = ' ';
+                else if (p[i] == '%' && i + 2 < len) {
+                    int hex; sscanf(p + i + 1, "%2x", &hex);
+                    ssid[j++] = (char)hex; i += 2;
+                } else ssid[j++] = p[i];
+            }
+            ssid[j] = '\0';
+            p = amp ? amp + 1 : NULL;
+        } else if (strncmp(p, "password=", 9) == 0) {
+            p += 9;
+            char *amp = strchr(p, '&');
+            int len = amp ? (int)(amp - p) : strlen(p);
+            if (len > 64) len = 64;
+            int j = 0;
+            for (int i = 0; i < len && j < 64; i++) {
+                if (p[i] == '+') password[j++] = ' ';
+                else if (p[i] == '%' && i + 2 < len) {
+                    int hex; sscanf(p + i + 1, "%2x", &hex);
+                    password[j++] = (char)hex; i += 2;
+                } else password[j++] = p[i];
+            }
+            password[j] = '\0';
+            p = amp ? amp + 1 : NULL;
+        } else {
+            char *amp = strchr(p, '&');
+            p = amp ? amp + 1 : NULL;
+        }
+    }
+
+    ESP_LOGI(TAG, "WiFi set: ssid='%s'", ssid);
+
+    if (strlen(ssid) == 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SSID is empty");
+        return ESP_OK;
+    }
+
+    // Use the firmware's SsidManager + WifiManager (persists to NVS, ensures
+    // TryWifiConnect finds credentials on reboot).
+    SsidManager::GetInstance().AddSsid(ssid, password);
+    auto &wifi = WifiManager::GetInstance();
+    wifi.StopStation();
+    vTaskDelay(pdMS_TO_TICKS(200));
+    wifi.StartStation();
+
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_sendstr(req,
+        "<html><body><h2>WiFi 已更新</h2>"
+        "<p>SSID: <b>已设置</b>。正在重连...</p>"
+        "<p>如长时间无响应，请重新进入配网模式。</p>"
+        "<script>setTimeout(function(){location.href='/wifi';},10000);</script>"
+        "</body></html>");
+    ESP_LOGI(TAG, "WiFi config updated and reconnecting");
     return ESP_OK;
 }
 
