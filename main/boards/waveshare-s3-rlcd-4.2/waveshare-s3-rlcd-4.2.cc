@@ -31,10 +31,11 @@
 #include "wifi_station.h"
 #include "mcp_server.h"
 #include "lvgl.h"
-// ESP Audio Codec (espressif/esp_audio_codec) - MP3 decoding
+// ESP Audio Codec (espressif/esp_audio_codec) - MP3/AAC/M4A decoding
 #include "esp_audio_simple_dec.h"
 #include "esp_audio_simple_dec_default.h"
 #include "esp_audio_dec_default.h"
+#include "decoder/impl/esp_aac_dec.h"
 
 #define TAG "waveshare_rlcd_4_2"
 
@@ -329,13 +330,14 @@ private:
     void OpenLogFile() {
         if (log_file_ != nullptr) return;
         time_t now = time(NULL);
-        struct tm *tm = localtime(&now);
-        if (tm->tm_year < 100) {
+        struct tm tm;
+        localtime_r(&now, &tm);
+        if (tm.tm_year < 100) {
             // Time not synced yet; use fallback timestamp
             snprintf(log_path_, sizeof(log_path_), "/sdcard/logs/log_00000000.txt");
         } else {
             snprintf(log_path_, sizeof(log_path_), "/sdcard/logs/log_%04d%02d%02d.txt",
-                     tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
         }
         log_file_ = fopen(log_path_, "a");
         if (log_file_) {
@@ -480,11 +482,12 @@ private:
 
         // Generate filename: /sdcard/records/rec_YYYYMMDD_HHMMSS.wav
         time_t now = time(NULL);
-        struct tm *tm = localtime(&now);
+        struct tm tm;
+        localtime_r(&now, &tm);
         char path[64];
         snprintf(path, sizeof(path), "/sdcard/records/rec_%04d%02d%02d_%02d%02d%02d.wav",
-                 tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
-                 tm->tm_hour, tm->tm_min, tm->tm_sec);
+                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                 tm.tm_hour, tm.tm_min, tm.tm_sec);
 
         // WAV header: 24kHz, 2ch, 16bit
         const int sample_rate = 24000;
@@ -847,11 +850,18 @@ private:
         return false;
     }
 
-    // ================= Music playback (MP3 from /sdcard/music) =================
-    // Decodes MP3 via esp_audio_codec simple decoder, downmixes stereo->mono,
-    // resamples to the codec rate (24kHz) with OpusResampler, then feeds PCM to
+    // ================= Music playback (MP3/MP4/AAC from /sdcard/music) =================
+    // Decodes via esp_audio_codec simple decoder, downmixes stereo->mono,
+    // resamples to the codec rate (24kHz) with LinearResample, then feeds PCM to
     // codec->OutputData(). Mirrors the recording play/stop/list patterns so the
     // MCP tools behave identically (self.list_music / self.play_music / ...).
+
+    // True if a filename is a supported music file (.mp3 / .aac / .m4a).
+    static bool IsMusicFile(const char* name) {
+        return strstr(name, ".mp3") || strstr(name, ".MP3") ||
+               strstr(name, ".aac") || strstr(name, ".AAC") ||
+               strstr(name, ".m4a") || strstr(name, ".M4A");
+    }
 
     void ListMusic() {
         if (!InitializeSdCard()) {
@@ -867,7 +877,7 @@ private:
         struct dirent *ent;
         printf("MUSIC_START\n");
         while ((ent = readdir(dir)) != NULL) {
-            if (strstr(ent->d_name, ".mp3") || strstr(ent->d_name, ".MP3")) {
+            if (IsMusicFile(ent->d_name)) {
                 char path[300];
                 snprintf(path, sizeof(path), "/sdcard/music/%.240s", ent->d_name);
                 struct stat st;
@@ -899,7 +909,7 @@ private:
         }
         struct dirent *ent;
         while ((ent = readdir(dir)) != NULL) {
-            if (strstr(ent->d_name, ".mp3") || strstr(ent->d_name, ".MP3")) {
+            if (IsMusicFile(ent->d_name)) {
                 char path[300];
                 snprintf(path, sizeof(path), "/sdcard/music/%.240s", ent->d_name);
                 struct stat st;
@@ -986,14 +996,24 @@ private:
         esp_audio_dec_register_default();
         esp_audio_simple_dec_register_default();
 
+        // Choose decoder by file extension: .mp3 -> MP3, .m4a -> M4A, .aac -> M4A
+        // (AAC bare stream has no simple parser; many .aac files are actually
+        // M4A/MP4 containers which the M4A parser handles, including AAC audio).
         esp_audio_simple_dec_cfg_t dec_cfg = {};
-        dec_cfg.dec_type  = ESP_AUDIO_SIMPLE_DEC_TYPE_MP3;
         dec_cfg.dec_cfg   = nullptr;
         dec_cfg.cfg_size  = 0;
         dec_cfg.use_frame_dec = false;
+        const char* codec_name = "MP3";
+        if (strstr(path, ".aac") || strstr(path, ".AAC") ||
+            strstr(path, ".m4a") || strstr(path, ".M4A")) {
+            dec_cfg.dec_type = ESP_AUDIO_SIMPLE_DEC_TYPE_M4A;
+            codec_name = "M4A";
+        } else {
+            dec_cfg.dec_type = ESP_AUDIO_SIMPLE_DEC_TYPE_MP3;
+        }
         esp_audio_simple_dec_handle_t decoder = nullptr;
         if (esp_audio_simple_dec_open(&dec_cfg, &decoder) != ESP_AUDIO_ERR_OK) {
-            ESP_LOGE(TAG, "Music: failed to open MP3 decoder");
+            ESP_LOGE(TAG, "Music: failed to open %s decoder", codec_name);
             fclose(f);
             codec->EnableOutput(false);
             ResumeAudioService();
@@ -1001,6 +1021,7 @@ private:
             ShowNotify("Music Failed");
             return false;
         }
+        ESP_LOGI(TAG, "Music: using %s decoder", codec_name);
 
         // Buffers: input read chunk + PCM output (max MP3 frame ~ 4608 bytes)
         const int kReadSize = 4096;
@@ -1057,9 +1078,11 @@ private:
 
                 esp_audio_err_t ret = esp_audio_simple_dec_process(decoder, &raw, &out);
                 if (ret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
+                    ESP_LOGI(TAG, "Music: decode buffer too small (needed %u)", out.needed_size);
                     break;  // out buf too small; next chunk handles it
                 }
                 if (ret != ESP_AUDIO_ERR_OK) {
+                    ESP_LOGW(TAG, "Music: decode error %d (consumed %u)", ret, raw.consumed);
                     break;
                 }
 
@@ -1285,7 +1308,7 @@ private:
 
         // List music files on SD card
         mcp_server.AddTool("self.list_music",
-            "List the MP3 music files stored in the /sdcard/music directory on the SD card.\n"
+            "List the music files (MP3/AAC/M4A) stored in the /sdcard/music directory on the SD card.\n"
             "Returns the filenames and sizes.\n"
             "Use this tool when the user asks what music is available, or wants to choose a song to play.",
             PropertyList(),
@@ -1295,7 +1318,7 @@ private:
 
         // Play a music file
         mcp_server.AddTool("self.play_music",
-            "Play an MP3 music file from the /sdcard/music directory on the SD card.\n"
+            "Play a music file (MP3/AAC/M4A) from the /sdcard/music directory on the SD card.\n"
             "The 'filename' parameter must be a filename from self.list_music results (e.g. song.mp3).\n"
             "Use this tool when the user asks to play a song, music, or audio file.",
             PropertyList({
@@ -1327,7 +1350,7 @@ private:
 
         // Delete a music file
         mcp_server.AddTool("self.delete_music",
-            "Delete a specific MP3 music file from the /sdcard/music directory on the SD card.\n"
+            "Delete a specific music file (MP3/AAC/M4A) from the /sdcard/music directory on the SD card.\n"
             "The 'filename' parameter must be a filename from self.list_music results (e.g. song.mp3).\n"
             "Use this tool when the user asks to delete or remove a music file.",
             PropertyList({

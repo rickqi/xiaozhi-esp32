@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <cerrno>
 #include <sys/stat.h>
 #include <sys/unistd.h>
 #include <esp_log.h>
@@ -38,10 +39,13 @@ std::string ChatLog::SanitizeTopic(const std::string& topic, size_t max_len) {
     std::string out;
     out.reserve(max_len + 2);
     for (char c : topic) {
-        // Allow alphanumerics, CJK, and a few safe punctuation chars.
-        bool printable = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                         (c >= '0' && c <= '9') || (c >= 0x80) ||
-                         (c == '-' || c == '_' || c == '.');
+        // Allow alphanumerics, CJK (multi-byte UTF-8), and a few safe
+        // punctuation chars. Cast to unsigned char so high-bit bytes (>=0x80)
+        // are correctly detected even though char is signed on Xtensa.
+        unsigned char uc = static_cast<unsigned char>(c);
+        bool printable = (uc >= 'a' && uc <= 'z') || (uc >= 'A' && uc <= 'Z') ||
+                         (uc >= '0' && uc <= '9') || (uc >= 0x80) ||
+                         (uc == '-' || uc == '_' || uc == '.');
         if (printable) {
             out += c;
         } else {
@@ -69,7 +73,8 @@ bool ChatLog::BeginConversation(const std::string& topic) {
         return false;
     }
 
-    // Ensure the chatlogs directory exists.
+    // Ensure the chatlogs directory exists (parent /sdcard/logs too).
+    mkdir("/sdcard/logs", 0755);
     mkdir(kChatLogsDir, 0755);
 
     std::string stamp = MakeTimestamp();
@@ -142,7 +147,7 @@ void ChatLog::LogAssistant(const std::string& text) {
     WriteJsonLine("assistant", text);
 }
 
-void ChatLog::AppendWav(const int16_t* data, size_t samples, bool stereo) {
+void ChatLog::AppendWav(const int16_t* data, size_t samples) {
     if (!active_ || !wav_file_) return;
     size_t bytes = samples * sizeof(int16_t);
     fwrite(data, 1, bytes, wav_file_);
@@ -153,7 +158,7 @@ void ChatLog::WriteInputPcm(const std::vector<int16_t>& pcm) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!active_) return;
     // pcm is interleaved stereo (mic, ref) at 24kHz.
-    AppendWav(pcm.data(), pcm.size(), true);
+    AppendWav(pcm.data(), pcm.size());
 }
 
 void ChatLog::WriteOutputPcm(const std::vector<int16_t>& pcm) {
@@ -170,7 +175,7 @@ void ChatLog::WriteOutputPcm(const std::vector<int16_t>& pcm) {
         stereo.push_back(kZero);
         stereo.push_back(s);
     }
-    AppendWav(stereo.data(), stereo.size(), true);
+    AppendWav(stereo.data(), stereo.size());
 }
 
 void ChatLog::ThrottledFsync() {

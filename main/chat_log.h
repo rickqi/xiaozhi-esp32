@@ -55,9 +55,8 @@ public:
     void EndConversation();
 
 private:
-    bool OpenFiles(const std::string& topic);
     void WriteJsonLine(const std::string& role, const std::string& text);
-    void AppendWav(const int16_t* data, size_t samples, bool stereo);
+    void AppendWav(const int16_t* data, size_t samples);
     void ThrottledFsync();
 
     bool active_ = false;
