@@ -95,6 +95,10 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
     lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
 
+    // Reset the idle-clock window so the notification is not immediately
+    // preempted by the clock SetStatus in UpdateStatusBar (C1 fix).
+    last_status_update_time_ = std::chrono::system_clock::now();
+
     esp_timer_stop(notification_timer_);
     ESP_ERROR_CHECK(esp_timer_start_once(notification_timer_, duration_ms * 1000));
 }
@@ -124,16 +128,27 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
     // Update time
     if (app.GetDeviceState() == kDeviceStateIdle) {
         if (last_status_update_time_ + std::chrono::seconds(10) < std::chrono::system_clock::now()) {
-            // Set status to clock "HH:MM"
-            time_t now = time(NULL);
-            struct tm* tm = localtime(&now);
-            // Check if the we have already set the time
-            if (tm->tm_year >= 2025 - 1900) {
-                char time_str[16];
-                strftime(time_str, sizeof(time_str), "%H:%M", tm);
-                SetStatus(time_str);
-            } else {
-                ESP_LOGW(TAG, "System time is not set, tm_year: %d", tm->tm_year);
+            bool notification_visible = false;
+            {
+                DisplayLockGuard lock(this);
+                notification_visible = (notification_label_ != nullptr) &&
+                    !lv_obj_has_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
+            }
+            // Skip the clock preemption while a notification is on screen
+            // (C1 fix), so long-duration notifications (e.g. 30s network
+            // events) are not hidden by the idle clock.
+            if (!notification_visible) {
+                // Set status to clock "HH:MM"
+                time_t now = time(NULL);
+                struct tm* tm = localtime(&now);
+                // Check if the we have already set the time
+                if (tm->tm_year >= 2025 - 1900) {
+                    char time_str[16];
+                    strftime(time_str, sizeof(time_str), "%H:%M", tm);
+                    SetStatus(time_str);
+                } else {
+                    ESP_LOGW(TAG, "System time is not set, tm_year: %d", tm->tm_year);
+                }
             }
         }
     }
