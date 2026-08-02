@@ -31,6 +31,7 @@
 #include "wifi_station.h"
 #include "mcp_server.h"
 #include "version_info.h"
+#include "http_file_server.h"
 #include "lvgl.h"
 // ESP Audio Codec (espressif/esp_audio_codec) - MP3/AAC/M4A decoding
 #include "esp_audio_simple_dec.h"
@@ -1916,6 +1917,39 @@ private:
                 }
                 return std::string("Error: chatlog file not found or delete failed: " + filename);
             });
+
+        // ================= WiFi HTTP file server (wireless file download) =================
+        mcp_server.AddTool("self.start_file_server",
+            "Start a WiFi HTTP file server so the user can download SD card files (logs, "
+            "chatlogs, recordings, music) wirelessly via a web browser, avoiding serial port "
+            "conflicts.\n"
+            "Returns the URL (e.g. http://192.168.1.100/) the user should open in a browser.\n"
+            "Use this tool when the user asks to download or transfer files from the device "
+            "(e.g. \u201c下载日志\u201d, \u201c获取文件\u201d, \u201c导出录音\u201d).",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                auto &srv = HttpFileServer::GetInstance();
+                if (srv.IsRunning()) {
+                    return std::string("File server already running: " + srv.GetUrl());
+                }
+                if (srv.Start(80)) {
+                    return std::string("File server started: " + srv.GetUrl());
+                }
+                return std::string("Error: failed to start file server (WiFi connected?)");
+            });
+
+        mcp_server.AddTool("self.stop_file_server",
+            "Stop the WiFi HTTP file server.\n"
+            "Use this tool when the user asks to stop or close the file download service.",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                auto &srv = HttpFileServer::GetInstance();
+                if (srv.IsRunning()) {
+                    srv.Stop();
+                    return std::string("File server stopped");
+                }
+                return std::string("File server was not running");
+            });
     }
 
     void InitializeLcdDisplay() {
@@ -2063,6 +2097,22 @@ private:
                 } else if (strcmp(line, "SYSLOGLIST") == 0) {
                     ESP_LOGI(TAG, "List system logs requested via serial");
                     board->ListSystemLogs();
+                } else if (strcmp(line, "HTTPSTART") == 0) {
+                    ESP_LOGI(TAG, "Start HTTP file server requested via serial");
+                    auto &srv = HttpFileServer::GetInstance();
+                    if (srv.IsRunning()) {
+                        printf("HTTP: already running: %s\n", srv.GetUrl().c_str());
+                    } else if (srv.Start(80)) {
+                        printf("HTTP: started: %s\n", srv.GetUrl().c_str());
+                    } else {
+                        printf("HTTP: start failed (WiFi connected?)\n");
+                    }
+                    fflush(stdout);
+                } else if (strcmp(line, "HTTPSTOP") == 0) {
+                    ESP_LOGI(TAG, "Stop HTTP file server requested via serial");
+                    HttpFileServer::GetInstance().Stop();
+                    printf("HTTP: stopped\n");
+                    fflush(stdout);
                 } else if (strcmp(line, "MUSICLIST") == 0) {
                     ESP_LOGI(TAG, "List music requested via serial");
                     board->ListMusic();

@@ -88,6 +88,8 @@ idf.py -p COM4 flash
 | `CHATLOG` | 触发模拟对话日志（验证 chatlogs 落盘） | `ChatLog: ...` 日志 |
 | `CHATLOGLIST` | 列出 SD 卡对话日志（`/sdcard/logs/chatlogs/`） | `CHATLOGS_START ... CHATLOGS_END (N files)` |
 | `SYSLOGLIST` | 列出 SD 卡系统日志（`/sdcard/logs/log_*.txt`） | `SYSLOGS_START ... SYSLOGS_END (N files)` |
+| `HTTPSTART` | 启动 WiFi HTTP 文件服务器 | `HTTP: started: http://<IP>:80/` |
+| `HTTPSTOP` | 停止 HTTP 文件服务器 | `HTTP: stopped` |
 
 使用 `idf.py monitor` 或任意串口工具（115200）即可交互。
 
@@ -112,6 +114,8 @@ idf.py -p COM4 flash
 | `self.get_chatlog_summary` | `filename` | 获取指定对话的文本摘要（最多 50 轮，JSON） |
 | `self.play_chatlog_audio` | `filename`, `channel`(可选 mixed/mic/ai) | 播放指定对话的音频（可选声道） |
 | `self.delete_chatlog` | `filename` | 删除指定对话（.txt + .wav） |
+| `self.start_file_server` | — | 启动 WiFi HTTP 文件服务器（浏览器下载 SD 卡文件） |
+| `self.stop_file_server` | — | 停止 HTTP 文件服务器 |
 | `self.list_music` | — | 列出 SD 卡 `/sdcard/music/` 下的 MP3 音乐 |
 | `self.play_music` | `filename` | 播放指定 MP3 音乐 |
 | `self.stop_music` | — | 停止当前音乐播放 |
@@ -132,6 +136,7 @@ idf.py -p COM4 flash
 - "听一下那段对话录音" → `self.play_chatlog_audio("chat_..._天气查询.wav")`
 - "只听小智的声音" → `self.play_chatlog_audio(..., channel="ai")`
 - "删掉那条对话" → `self.delete_chatlog("chat_...txt")`
+- "下载日志" / "导出文件" → `self.start_file_server`（返回 URL，浏览器打开即可下载）
 
 ---
 

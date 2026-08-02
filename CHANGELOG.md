@@ -6,6 +6,20 @@
 
 ---
 
+## v2.5.0 — 2026-08-02
+
+### feat
+- **WiFi HTTP 文件服务器**：通过浏览器/curl 无线下载 SD 卡文件（日志/对话日志/录音/音乐），规避串口冲突
+  - 新增 `main/http_file_server.{h,cc}`：`HttpFileServer` 单例（`Start(port)`/`Stop()`/`GetUrl()`）
+  - 路由：`GET /` 首页（SD 卡目录导航）/ `GET /status` JSON 状态 / `GET /*` 通配（目录浏览 HTML + 文件下载流式传输）
+  - 文件流式传输用 PSRAM 缓冲（8KB chunk），Content-Type 自动识别（txt/wav/mp3/json 等）
+  - 路径遍历防护（拒绝 `..`）
+- 新增 MCP 工具 `self.start_file_server` / `self.stop_file_server`（语音可调用，返回 URL）
+- 新增串口命令 `HTTPSTART` / `HTTPSTOP`
+- 无新依赖（`esp_http_server` 已链接进固件）
+
+---
+
 ## v2.4.0 — 2026-08-02
 
 ### feat
