@@ -898,6 +898,88 @@ private:
         return "chat";
     }
 
+    // List system log files (ESP_LOG tee, log_YYYYMMDD.txt) under /sdcard/logs/
+    // to serial. These are the daily-rotating system logs, distinct from chatlogs.
+    void ListSystemLogs() {
+        if (!InitializeSdCard()) {
+            printf("SYSLOGS: no SD card\n");
+            return;
+        }
+        DIR *dir = opendir("/sdcard/logs");
+        if (!dir) {
+            printf("SYSLOGS: no logs dir\n");
+            return;
+        }
+        int count = 0;
+        struct dirent *ent;
+        printf("SYSLOGS_START\n");
+        while ((ent = readdir(dir)) != NULL) {
+            if (strncmp(ent->d_name, "log_", 4) == 0 && strstr(ent->d_name, ".txt")) {
+                char path[300];
+                snprintf(path, sizeof(path), "/sdcard/logs/%.*s",
+                         (int)(sizeof(path) - 14), ent->d_name);
+                struct stat st;
+                long size = 0;
+                if (stat(path, &st) == 0) size = st.st_size;
+                printf("%s %ldB\n", ent->d_name, size);
+                count++;
+            }
+        }
+        closedir(dir);
+        printf("SYSLOGS_END (%d files)\n", count);
+        fflush(stdout);
+    }
+
+    // Build JSON list of system log files (log_YYYYMMDD.txt). Returns name + size.
+    cJSON *ListSystemLogsJson() {
+        cJSON *json = cJSON_CreateObject();
+        cJSON *files = cJSON_CreateArray();
+        if (!InitializeSdCard()) {
+            cJSON_AddStringToObject(json, "error", "no SD card");
+            cJSON_AddItemToObject(json, "system_logs", files);
+            return json;
+        }
+        DIR *dir = opendir("/sdcard/logs");
+        if (!dir) {
+            cJSON_AddStringToObject(json, "error", "no logs directory");
+            cJSON_AddItemToObject(json, "system_logs", files);
+            return json;
+        }
+        struct {
+            char name[64];
+            long size;
+        } list[40];
+        int count = 0;
+        struct dirent *ent;
+        while ((ent = readdir(dir)) != NULL && count < 40) {
+            if (strncmp(ent->d_name, "log_", 4) == 0 && strstr(ent->d_name, ".txt")) {
+                char path[300];
+                snprintf(path, sizeof(path), "/sdcard/logs/%.*s",
+                         (int)(sizeof(path) - 14), ent->d_name);
+                struct stat st;
+                long size = 0;
+                if (stat(path, &st) == 0) size = st.st_size;
+                snprintf(list[count].name, sizeof(list[count].name), "%.*s",
+                         (int)sizeof(list[count].name) - 1, ent->d_name);
+                list[count].size = size;
+                count++;
+            }
+        }
+        closedir(dir);
+        // Newest first (log_YYYYMMDD sorts chronologically) -> reverse
+        int max_show = count < 20 ? count : 20;
+        for (int i = count - 1, j = 0; i >= 0 && j < max_show; i--, j++) {
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "name", list[i].name);
+            cJSON_AddNumberToObject(item, "size", list[i].size);
+            cJSON_AddItemToArray(files, item);
+        }
+        cJSON_AddStringToObject(json, "directory", "/sdcard/logs");
+        cJSON_AddNumberToObject(json, "count", count);
+        cJSON_AddItemToObject(json, "system_logs", files);
+        return json;
+    }
+
     // List chatlog .txt files to serial (mirrors ListRecordings). Reports the
     // paired .wav size/duration when present.
     void ListChatlogs() {
@@ -1752,16 +1834,25 @@ private:
             });
 
         // ================= ChatLog management (voice queryable) =================
-        // List recent chat conversation logs saved on the SD card.
+        // List recent chat conversation logs or system logs saved on the SD card.
         mcp_server.AddTool("self.list_chatlogs",
-            "List the most recent chat conversation logs saved on the SD card.\n"
-            "Each entry includes the filename, topic, text/wav sizes, audio duration in seconds, "
-            "and the real start time of the conversation.\n"
-            "Returns up to 10 entries, newest first.\n"
+            "List log files saved on the SD card. The optional 'directory' parameter selects which set:\n"
+            "  - \"chatlogs\" (default): recent AI conversation logs in /sdcard/logs/chatlogs/, "
+            "each with topic, text/wav sizes, audio duration, and start time.\n"
+            "  - \"system_logs\" or \"logs\": daily system logs in /sdcard/logs/ (log_YYYYMMDD.txt), "
+            "each with filename and size. These are ESP_LOG output tee'd to SD.\n"
+            "Returns up to 10 (chatlogs) or 20 (system_logs) entries, newest first.\n"
             "Use this tool when the user asks about recent conversations, chat history, "
-            "or what was talked about (e.g. \u201c最近聊了什么\u201d, \u201c聊天记录\u201d, \u201c对话历史\u201d).",
-            PropertyList(),
-            [this](const PropertyList&) -> ReturnValue {
+            "system logs, or log files (e.g. \u201c最近聊了什么\u201d, \u201c对话记录\u201d, "
+            "\u201c系统日志\u201d, \u201clogs目录的文件\u201d, \u201c日志文件\u201d).",
+            PropertyList({
+                Property("directory", kPropertyTypeString, std::string("chatlogs"))
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                std::string directory = properties["directory"].value<std::string>();
+                if (directory == "system_logs" || directory == "logs") {
+                    return static_cast<cJSON*>(ListSystemLogsJson());
+                }
                 return static_cast<cJSON*>(ListChatlogsJson());
             });
 
@@ -1969,6 +2060,9 @@ private:
                 } else if (strcmp(line, "CHATLOGLIST") == 0) {
                     ESP_LOGI(TAG, "List chatlogs requested via serial");
                     board->ListChatlogs();
+                } else if (strcmp(line, "SYSLOGLIST") == 0) {
+                    ESP_LOGI(TAG, "List system logs requested via serial");
+                    board->ListSystemLogs();
                 } else if (strcmp(line, "MUSICLIST") == 0) {
                     ESP_LOGI(TAG, "List music requested via serial");
                     board->ListMusic();
