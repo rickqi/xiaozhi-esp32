@@ -31,6 +31,7 @@ set(SOURCES "audio/audio_codec.cc"
             "protocols/websocket_protocol.cc"
             "mcp_server.cc"
             "system_info.cc"
+            "version_info.cc"
             "application.cc"
             "ota.cc"
             "settings.cc"
@@ -739,8 +740,20 @@ idf_component_register(SRCS ${SOURCES}
 if(NOT BOARD_NAME)
     set(BOARD_NAME ${BOARD_TYPE})
 endif()
+
+# Capture the current git commit short hash (short SHA) for firmware version info.
+# Falls back to "unknown" if git is unavailable or the tree is not a repo.
+execute_process(COMMAND git -C ${PROJECT_DIR} rev-parse --short HEAD
+    OUTPUT_VARIABLE GIT_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT GIT_COMMIT)
+    set(GIT_COMMIT "unknown")
+endif()
+
 target_compile_definitions(${COMPONENT_LIB}
                     PRIVATE BOARD_TYPE=\"${BOARD_TYPE}\" BOARD_NAME=\"${BOARD_NAME}\"
+                    PRIVATE GIT_COMMIT=\"${GIT_COMMIT}\"
                     PRIVATE BUILTIN_TEXT_FONT=${BUILTIN_TEXT_FONT} BUILTIN_ICON_FONT=${BUILTIN_ICON_FONT}
                     )
 

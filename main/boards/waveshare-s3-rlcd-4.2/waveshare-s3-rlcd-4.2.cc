@@ -30,6 +30,7 @@
 #include "codecs/box_audio_codec.h"
 #include "wifi_station.h"
 #include "mcp_server.h"
+#include "version_info.h"
 #include "lvgl.h"
 // ESP Audio Codec (espressif/esp_audio_codec) - MP3/AAC/M4A decoding
 #include "esp_audio_simple_dec.h"
@@ -1392,6 +1393,18 @@ private:
                     return std::string("No self-test result yet. Run self.run_self_test first.");
                 }
                 return self_test_result_;
+            });
+
+        // Firmware version / build / feature / flash info (voice queryable)
+        mcp_server.AddTool("self.get_version_info",
+            "Get the firmware version, build info (compile time, git commit, ESP-IDF version), "
+            "flash size, partition layout, and the list of features supported by this device.\n"
+            "Use this tool when the user asks about the firmware version, what this device can do, "
+            "its features or capabilities, hardware/flash info, or build/compile info "
+            "(e.g. \u201c你的版本是多少\u201d, \u201c你都有什么功能\u201d, \u201c固件信息\u201d).",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                return VersionInfo::BuildVersionInfoJson();
             });
     }
 

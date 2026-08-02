@@ -105,6 +105,7 @@ idf.py -p COM4 flash
 | `self.delete_recording` | `filename` | 删除指定录音 |
 | `self.run_self_test` | — | 触发硬件自检 |
 | `self.get_self_test_result` | — | 获取最近一次自检结果（JSON） |
+| `self.get_version_info` | — | 获取固件版本、构建信息、功能清单、烧录信息（JSON） |
 | `self.list_music` | — | 列出 SD 卡 `/sdcard/music/` 下的 MP3 音乐 |
 | `self.play_music` | `filename` | 播放指定 MP3 音乐 |
 | `self.stop_music` | — | 停止当前音乐播放 |
@@ -118,6 +119,7 @@ idf.py -p COM4 flash
 - "播放刚才的录音" → `self.play_recording(...)`
 - "放首歌听听" → `self.list_music` → `self.play_music("song1.mp3")`
 - "音乐停一下" → `self.stop_music`
+- "你的版本是多少？" / "你都有什么功能？" → `self.get_version_info`
 
 ---
 
