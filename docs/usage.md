@@ -96,6 +96,7 @@ idf.py -p $env:XIAOZHI_PORT flash
 | `SYSLOGLIST` | 列出 SD 卡系统日志（`/sdcard/logs/log_*.txt`） | `SYSLOGS_START ... SYSLOGS_END (N files)` |
 | `HTTPSTART` | 启动 WiFi HTTP 文件服务器 | `HTTP: started: http://<IP>:80/` |
 | `HTTPSTOP` | 停止 HTTP 文件服务器 | `HTTP: stopped` |
+| `BTSCAN` | 扫描并连接 BLE 键盘（先让键盘进入配对模式） | 扫描日志 + 连接结果 |
 
 使用 `idf.py monitor` 或任意串口工具（115200）即可交互。
 
@@ -149,18 +150,61 @@ idf.py -p $env:XIAOZHI_PORT flash
 
 ---
 
-## 5. 设备自检
+## 5. 蓝牙键盘（BLE HID）
+
+设备支持通过 BLE 连接无线蓝牙键盘作为输入设备（ESP32-S3 仅支持 BLE，不支持经典蓝牙；老式 BT 2.x/3.x 键盘无法配对）。
+
+### 5.1 配对键盘
+
+1. 让键盘进入**配对模式**（BLE 键盘常见方式：长按 Connect 键 / `Fn+C` / `Fn+1`，指示灯快速闪烁）
+2. 向串口发送 `BTSCAN`（115200 波特率，回车结束）
+3. 设备扫描周围 BLE 键盘（约 10 秒），自动连接第一个发现的键盘
+4. 连接成功后屏幕显示"键盘已连接"（Just Works 配对，无需输入密码）
+
+> ⚠️ **注意**：配对前务必先让键盘进入配对模式。若键盘未配对，连接会挂起 30 秒超时（期间占用部分内存，超时后自动释放）。
+
+### 5.2 快捷键映射
+
+| 按键 | 功能 |
+|---|---|
+| Enter | 开始/停止与 AI 对话 |
+| Esc | 停止监听 |
+| Space | 开始监听 |
+| ↑ / ↓ | 音量 ±10 |
+| R | 截图 |
+| T | 开始/停止录音 |
+| M | 麦克风静音切换 |
+| V | 版本信息弹窗 |
+| Tab | 播放提示音 |
+| 1 | 播放提示音 |
+| 2 | 重置网络（进入配网模式） |
+| 3 | 系统信息弹窗 |
+| 4 | 播放最近一条录音 |
+| 5 | 电量检查 |
+| 6 | HTTP 服务器开关 |
+| 7 | 停止 HTTP 服务器 |
+| 8 | 触发唤醒词 |
+| 9 | 重启设备 |
+
+### 5.3 断开
+
+- 键盘关闭或远离后自动断开，屏幕显示"键盘已断开"
+- 重新连接需再次让键盘进入配对模式 + `BTSCAN`
+
+---
+
+## 6. 设备自检
 
 对标产测固件，一键验证 7 项硬件通路。
 
-### 5.1 触发方式
+### 6.1 触发方式
 
 | 方式 | 操作 |
 |---|---|
 | 串口 | 发送 `SELFTEST` |
 | AI 对话 | 让 AI 调用 `self.run_self_test` |
 
-### 5.2 测试项
+### 6.2 测试项
 
 | 测试项 | 验证内容 |
 |---|---|
@@ -174,7 +218,7 @@ idf.py -p $env:XIAOZHI_PORT flash
 
 > 设备正在对话/录音时，Audio 项自动跳过（`skipped (busy)`），不影响其他项目。
 
-### 5.3 结果查看
+### 6.3 结果查看
 
 - **屏幕**：每项完成时通知显示 `SELFTEST <项目> PASS/FAIL`，最后显示汇总 `SelfTest: 7/7 ALL PASS`
 - **串口**：完整逐项日志（`SELFTEST ... PASS - <详情>`）
@@ -194,14 +238,14 @@ SELFTEST SelfTest: 7/7 ALL PASS
 
 ---
 
-## 6. SD 卡录音管理
+## 7. SD 卡录音管理
 
-### 6.1 目录结构
+### 7.1 目录结构
 
 - 录音：`/sdcard/records/rec_YYYYMMDD_HHMMSS.wav`（24kHz 立体声 16bit WAV）
 - 日志：`/sdcard/logs/log_YYYYMMDD.txt`（系统日志自动落盘）
 
-### 6.2 录音方法
+### 7.2 录音方法
 
 | 方式 | 操作 |
 |---|---|
@@ -209,7 +253,7 @@ SELFTEST SelfTest: 7/7 ALL PASS
 | AI 对话 | `self.record_audio(duration_seconds)` 定时录音（1–120s） |
 | 串口 | 无直接命令（用按键或 AI） |
 
-### 6.3 播放方法
+### 7.3 播放方法
 
 | 方式 | 操作 |
 |---|---|
@@ -220,11 +264,11 @@ SELFTEST SelfTest: 7/7 ALL PASS
 
 ---
 
-## 7. 音乐播放（MP3）
+## 8. 音乐播放（MP3）
 
 设备支持播放 SD 卡 `/sdcard/music/` 目录下的 **MP3 音乐文件**（使用官方 `esp_audio_codec` 解码，自动处理立体声→单声道，并支持任意采样率重采样至 24kHz，兼容常见 44.1/48kHz 音乐）。
 
-### 7.1 放入音乐
+### 8.1 放入音乐
 
 将 MP3 文件复制到 SD 卡的 `music` 目录：
 
@@ -238,7 +282,7 @@ SELFTEST SelfTest: 7/7 ALL PASS
 > 首次挂载 SD 卡时固件会自动创建 `music` 目录。
 > **支持中文文件名**（固件 FATFS 已配置 UTF-8 编码 + 简体中文字符集），如 `凄美地.mp3` 可直接播放。
 
-### 7.2 操作方法
+### 8.2 操作方法
 
 | 方式 | 操作 |
 |---|---|
@@ -246,7 +290,7 @@ SELFTEST SelfTest: 7/7 ALL PASS
 | AI 对话 | 让 AI 调用 `self.list_music` → `self.play_music(filename)` → `self.stop_music` |
 | 删除歌曲 | AI 调用 `self.delete_music(filename)` |
 
-### 7.3 MCP 工具
+### 8.3 MCP 工具
 
 | 工具 | 参数 | 功能 |
 |---|---|---|
@@ -255,7 +299,7 @@ SELFTEST SelfTest: 7/7 ALL PASS
 | `self.stop_music` | — | 停止当前播放 |
 | `self.delete_music` | `filename` | 删除指定 MP3 |
 
-### 7.4 串口命令
+### 8.4 串口命令
 
 | 命令 | 功能 |
 |---|---|
@@ -263,7 +307,7 @@ SELFTEST SelfTest: 7/7 ALL PASS
 | `MUSICPLAY <文件名>` | 播放指定音乐（如 `MUSICPLAY song1.mp3`） |
 | `MUSICSTOP` | 停止播放 |
 
-### 7.5 播放时屏幕显示
+### 8.5 播放时屏幕显示
 
 播放音乐时，屏幕底部通知栏会依次显示：
 
@@ -284,18 +328,18 @@ SELFTEST SelfTest: 7/7 ALL PASS
 
 ---
 
-## 8. 对话日志（聊天记录）
+## 9. 对话日志（聊天记录）
 
 设备自动把每次 AI 对话的**文本**和**语音**保存到 SD 卡 `/sdcard/logs/chatlogs/` 目录，按**对话时间 + 主题**命名。
 
-### 8.1 保存内容
+### 9.1 保存内容
 
 | 文件 | 格式 | 内容 |
 |---|---|---|
 | `.txt` | JSONL（每行一条） | 对话文本：时间戳 + 角色(user/assistant) + 内容 |
 | `.wav` | 24kHz 立体声 16bit | 音频：ch0=用户麦克风，ch1=AI 喇叭（AEC 参考回采） |
 
-### 8.2 文件名规则
+### 9.2 文件名规则
 
 ```
 /sdcard/logs/chatlogs/
@@ -306,21 +350,21 @@ SELFTEST SelfTest: 7/7 ALL PASS
 - **时间**：会话开始的 `YYYYMMDD_HHMMSS`（RTC/NTP 时间）
 - **主题**：自动取**首条用户语音识别文本**（截断 20 字），如"今天天气怎么样"
 
-### 8.3 对话文本示例（.txt）
+### 9.3 对话文本示例（.txt）
 
 ```json
 {"ts":"2026-08-01 20:14:17","role":"user","text":"今天天气怎么样"}
 {"ts":"2026-08-01 20:14:18","role":"assistant","text":"今天天气晴朗，气温26度。"}
 ```
 
-### 8.4 说明
+### 9.4 说明
 
 - 会话从**音频通道打开**（唤醒/按键开始对话）到**通道关闭**结束
 - 音频通过 AEC 参考通道同步捕获 AI 说话声，无需额外混音
 - 文本按 1s 节流 fsync 落盘，音频在会话结束时写入 WAV 头
 - **无需 SD 卡时自动跳过**（不影响对话）
 
-### 8.5 调试命令
+### 9.5 调试命令
 
 串口发送 `CHATLOG` 可触发一次**模拟会话**（写入测试文本+音频），用于验证日志功能：
 
@@ -333,7 +377,7 @@ I (10662) ChatLog: Conversation log ended: chat_20260801_201417_设备调试.txt
 
 ---
 
-## 9. 屏幕截图
+## 10. 屏幕截图
 
 - **BOOT 长按**：截取当前屏幕，输出 P4 PBM 格式（base64，72 字符/行）
 - **串口 `SHOOT`**：同上
@@ -343,7 +387,7 @@ I (10662) ChatLog: Conversation log ended: chat_20260801_201417_设备调试.txt
 
 ---
 
-## 10. 配网与网络
+## 11. 配网与网络
 
 - **配网模式**：开机时按住 BOOT 或串口发送 `self.disp.network` 触发
 - **网络事件**：连接状态通过屏幕状态栏图标显示
@@ -351,7 +395,7 @@ I (10662) ChatLog: Conversation log ended: chat_20260801_201417_设备调试.txt
 
 ---
 
-## 11. 常见问题排查
+## 12. 常见问题排查
 
 | 现象 | 可能原因 / 处理 |
 |---|---|
@@ -368,6 +412,9 @@ I (10662) ChatLog: Conversation log ended: chat_20260801_201417_设备调试.txt
 | `self.play_music` 返回"already playing" | 当前有音乐在播，先调用 `self.stop_music` |
 | `chatlogs` 目录无新对话文件 | 对话需连接服务器（音频通道打开才记录）；SD 卡未插入时不记录 |
 | 对话 `.txt` 中文乱码 | 文件为 UTF-8 编码，用支持 UTF-8 的编辑器（VS Code/记事本）打开 |
+| `BTSCAN` 扫描不到键盘 | 确认键盘已进入配对模式（指示灯快闪）；ESP32-S3 仅支持 BLE 键盘（BT 2.x/3.x 不支持） |
+| 键盘连接后按键无反应 | 确认键盘在 Report 模式；部分键盘需先配对授权（重新 `BTSCAN`） |
+| 键盘连接占用内存后功能异常 | 连接失败会 30s 超时自动释放；避免在未配对状态下反复 `BTSCAN` |
 
 ---
 

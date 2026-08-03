@@ -26,6 +26,7 @@
 #include "wifi_board.h"
 #include "application.h"
 #include "button.h"
+#include "bluetooth_keyboard.h"
 #include "config.h"
 #include "system_info.h"
 #include "assets/lang_config.h"
@@ -72,6 +73,7 @@ private:
     // The default 180ms (CONFIG_BUTTON_SHORT_PRESS_TIME_MS) is too tight:
     // a slow 3rd click breaks the sequence and only double-click fires.
     Button key_button_{GPIO_NUM_18, false, 0, 500};
+    BluetoothKeyboard bt_keyboard_;
     sdmmc_card_t *sdcard_card_ = nullptr;
     bool sdcard_mounted_ = false;
     volatile bool recording_ = false;
@@ -284,6 +286,159 @@ private:
             ESP_LOGI(TAG, "KEY triple click: play latest recording");
             xTaskCreatePinnedToCore(PlayTask, "sd_play", 8 * 1024, this, 3, NULL, 1);
         }, 3);
+    }
+
+    // BLE keyboard input (HID Host via esp_hid / NimBLE).
+    void InitializeKeyboard() {
+#if CONFIG_USE_BLE_HID_KEYBOARD
+        bt_keyboard_.Init();
+        bt_keyboard_.OnKeyPress([this](uint8_t keycode, uint8_t modifier) {
+            // BLE event runs on NimBLE host task -> forward to main task.
+            auto& app_ref = Application::GetInstance();
+            app_ref.Schedule([this, keycode, modifier]() {
+                HandleKeyboardKey(keycode, modifier);
+            });
+        });
+        bt_keyboard_.OnConnect([this]() {
+            auto display = Board::GetInstance().GetDisplay();
+            if (display) {
+                display->ShowNotification("键盘已连接", 3000);
+            }
+            ESP_LOGI(TAG, "BLE keyboard connected");
+        });
+        bt_keyboard_.OnDisconnect([this]() {
+            auto display = Board::GetInstance().GetDisplay();
+            if (display) {
+                display->ShowNotification("键盘已断开", 3000);
+            }
+            ESP_LOGI(TAG, "BLE keyboard disconnected");
+        });
+        // NOTE: No auto-scan at boot. Auto-connecting to nearby keyboards that
+        // are not in pairing mode leaks NimBLE connection memory on each failed
+        // attempt (free heap dropped 117KB -> 11KB, breaking OTA version check
+        // and HTTP server). Scan is triggered manually via serial `BTSCAN`.
+#endif
+    }
+
+    void KeyboardScanNow() {
+#if CONFIG_USE_BLE_HID_KEYBOARD
+        ESP_LOGI(TAG, "BLE keyboard scan requested");
+        bt_keyboard_.StartScan(10);
+#endif
+    }
+
+    void AdjustVolume(int delta) {
+        auto codec = Board::GetInstance().GetAudioCodec();
+        if (codec) {
+            int v = codec->output_volume() + delta;
+            codec->SetOutputVolume(v < 0 ? 0 : (v > 100 ? 100 : v));
+            ESP_LOGI(TAG, "BLE key: volume -> %d", v);
+        }
+    }
+
+    void ToggleMicMute() {
+        auto codec = Board::GetInstance().GetAudioCodec();
+        if (codec != nullptr) {
+            bool muted = !codec->input_enabled();
+            codec->EnableInput(!muted);
+            ESP_LOGI(TAG, "BLE key: mic %s", muted ? "MUTED" : "UNMUTED");
+        }
+    }
+
+    void ResetNetwork() {
+        // Re-enter WiFi config mode (available on WifiBoard).
+        ESP_LOGI(TAG, "BLE key: reset network");
+        EnterWifiConfigMode();
+    }
+
+    // Map BLE keyboard HID keycodes (USB HID Usage Table, Keyboard page 0x07)
+    // to device actions. Runs on the main task (safe to call Application/Board APIs).
+    void HandleKeyboardKey(uint8_t keycode, uint8_t /*modifier*/) {
+        auto& app = Application::GetInstance();
+        auto display = Board::GetInstance().GetDisplay();
+        ESP_LOGI(TAG, "BLE key: 0x%02x", keycode);
+        switch (keycode) {
+        case 0x28:  // Enter
+            app.ToggleChatState();
+            break;
+        case 0x29:  // Esc
+            app.StopListening();
+            break;
+        case 0x2C:  // Space
+            app.StartListening();
+            break;
+        case 0x52:  // Up arrow
+            AdjustVolume(+10);
+            break;
+        case 0x51:  // Down arrow
+            AdjustVolume(-10);
+            break;
+        case 0x13:  // R
+            ESP_LOGI(TAG, "BLE key: screenshot");
+            TakeScreenshot();
+            break;
+        case 0x15:  // T
+            ToggleRecording();
+            break;
+        case 0x12:  // M
+            ToggleMicMute();
+            break;
+        case 0x19:  // V
+            ShowVersionPopup();
+            break;
+        case 0x2B:  // Tab
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+            break;
+        // === 数字键 1-9 快捷功能（步骤4）===
+        case 0x1E:  // 1
+            app.PlaySound(Lang::Sounds::OGG_POPUP);
+            break;
+        case 0x1F:  // 2
+            ResetNetwork();
+            break;
+        case 0x20:  // 3
+            if (display) {
+                std::string info = "System: " + std::string(SystemInfo::GetUserAgent());
+                display->ShowNotification(info.c_str(), 4000);
+            }
+            break;
+        case 0x21:  // 4
+            xTaskCreatePinnedToCore(PlayTask, "sd_play", 8 * 1024, this, 3, NULL, 1);
+            break;
+        case 0x22:  // 5
+            if (display) {
+                display->ShowNotification("Battery check...", 2000);
+            }
+            break;
+        case 0x23:  // 6
+            {
+                auto& srv = HttpFileServer::GetInstance();
+                if (srv.IsRunning()) {
+                    srv.Stop();
+                    if (display) display->ShowNotification("HTTP stopped", 2000);
+                } else if (srv.Start(80)) {
+                    if (display) display->ShowNotification("HTTP started", 2000);
+                }
+            }
+            break;
+        case 0x24:  // 7
+            {
+                auto& srv = HttpFileServer::GetInstance();
+                srv.Stop();
+                if (display) display->ShowNotification("HTTP stopped", 2000);
+            }
+            break;
+        case 0x25:  // 8
+            app.WakeWordInvoke("你好小智");
+            break;
+        case 0x26:  // 9
+            ESP_LOGI(TAG, "BLE key: reboot");
+            vTaskDelay(pdMS_TO_TICKS(100));
+            app.Reboot();
+            break;
+        default:
+            break;
+        }
     }
 
     static void PlayTask(void *arg) {
@@ -2171,6 +2326,9 @@ private:
                 } else if (strcmp(line, "MUSICSTOP") == 0) {
                     ESP_LOGI(TAG, "Stop music requested via serial");
                     board->StopMusic();
+                } else if (strcmp(line, "BTSCAN") == 0) {
+                    ESP_LOGI(TAG, "BLE keyboard scan requested via serial");
+                    board->KeyboardScanNow();
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -2593,6 +2751,7 @@ public:
         InitializeI2c();
         InitRtcClock();          // read PCF85063 RTC -> settimeofday() for instant clock
         InitializeButtons();
+        InitializeKeyboard();   // BLE HID keyboard input (MVP hotkeys)
         InitializeTools();
         InitializeLcdDisplay();
         InitializeAdc();

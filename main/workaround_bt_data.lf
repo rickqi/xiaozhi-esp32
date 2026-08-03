@@ -1,0 +1,10 @@
+# Workaround for IDF 5.5.2 ldgen bug:
+# BT component fragments (linker_rw_bt_controller.lf, linker_esp_ble_controller.lf)
+# reference a section named "data" (e.g. "data -> dram0_data") in their
+# [scheme:bt_default]. ESP32-S3's sections.ld.in defines the section as
+# "dram0_data" and has no plain "data" alias, so ldgen fails with
+# "Undefined reference to sections 'data'". Defining the alias here makes
+# the scheme resolvable.
+[sections:data]
+entries:
+    .data

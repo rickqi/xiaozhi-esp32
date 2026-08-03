@@ -609,6 +609,9 @@ endif()
 if (CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING)
     list(APPEND SOURCES "boards/common/blufi.cpp")
 endif ()
+if (CONFIG_USE_BLE_HID_KEYBOARD)
+    list(APPEND SOURCES "boards/common/bluetooth_keyboard.cc")
+endif ()
 # Select language directory according to Kconfig
 if(CONFIG_LANGUAGE_ZH_CN)
     set(LANG_DIR "zh-CN")
@@ -734,6 +737,7 @@ idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
+                    LINKER_FRAGMENTS workaround_bt_data.lf
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

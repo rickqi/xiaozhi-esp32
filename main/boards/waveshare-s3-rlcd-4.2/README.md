@@ -107,6 +107,7 @@ I (21836) waveshare_rlcd_4_2: SELFTEST SelfTest: 7/7 ALL PASS
 | `SYSLOGLIST` | 列出 SD 卡系统日志（logs 目录 log_*.txt） |
 | `HTTPSTART` | 启动 WiFi HTTP 文件服务器 |
 | `HTTPSTOP` | 停止 HTTP 文件服务器 |
+| `BTSCAN` | 扫描并连接 BLE 键盘（先让键盘进入配对模式） |
 
 ### 5. 音乐播放（MP3）
 
@@ -163,6 +164,7 @@ idf.py -p $env:XIAOZHI_PORT flash monitor
 
 | 版本/提交 | 内容 |
 |---|---|
+| v3.2.0 | **新增蓝牙键盘输入（BLE HID Host）**：`BluetoothKeyboard` 类 + esp_hid（NimBLE）连接 BLE 键盘；快捷键控制（Enter=对话/Esc=停止/Space=监听/↑↓=音量/R=截图/T=录音/M=静音/V=版本/Tab=提示音 + 数字键快捷功能）；串口 `BTSCAN` 配对；修复自动扫描连接不可达键盘导致的内存泄漏 |
 | 本次 | **新增对话日志（ChatLog）**：AI 对话文本+语音自动保存到 `/sdcard/logs/chatlogs/`，按时间+主题命名；`AudioService` 新增输入/输出音频 tap 回调；JSONL 文本 + 24kHz 双通道 WAV（麦克风+AI喇叭AEC回采）；串口 `CHATLOG` 调试命令 |
 | 本次 | **新增 MP3 音乐播放**：`espressif/esp_audio_codec` 解码 + MCP 工具（list/play/stop/delete_music）+ 串口命令（MUSICLIST/MUSICPLAY/MUSICSTOP）+ `/sdcard/music` 目录 + 线性插值重采样链 |
 | 本次 | **中文文件名支持**：FATFS 切换 UTF-8 API 编码 + codepage 936（简体中文），中文歌名可识别/播放 |

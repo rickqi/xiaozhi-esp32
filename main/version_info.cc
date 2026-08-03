@@ -31,6 +31,7 @@ static const char* kFeatures[] = {
     "电池监测与低电量提醒，支持充电状态显示",
     "硬件自检：7 项（显示/按键/SD 卡/电池/RTC/温湿度/音频）",
     "本地截图：串口或按键触发，PBM 输出",
+    "蓝牙键盘输入：BLE HID Host 连接键盘，快捷键控制（对话/音量/截图/录音等），串口 BTSCAN 配对",
 };
 
 std::string GetVersionString() {

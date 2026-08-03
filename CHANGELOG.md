@@ -6,6 +6,27 @@
 
 ---
 
+## v3.2.0 — 2026-08-03
+
+### feat
+- **蓝牙键盘输入（BLE HID Host）**：通过 `esp_hid` 组件（NimBLE 后端）连接 BLE 键盘，作为输入设备
+  - 新增 `BluetoothKeyboard` 类（`main/boards/common/bluetooth_keyboard.{h,cc}`）：esp_hidh 初始化、GAP 扫描（appearance 0x03C1 过滤键盘）、HID Boot 报告解析、Just Works 配对（无 UI 设备）
+  - **快捷键映射**：Enter=开始/停止对话、Esc=停止监听、Space=开始监听、↑/↓=音量±10、R=截图、T=录音、M=麦克风静音、V=版本信息、Tab=提示音
+  - **数字键快捷功能**：1=提示音、2=重置网络、3=系统信息、4=播放最近录音、5=电量、6/7=HTTP 服务器开关、8=唤醒词触发、9=重启
+  - **串口命令 `BTSCAN`**：手动触发 BLE 键盘扫描配对（避免开机自动扫描导致的内存泄漏）
+  - 屏幕通知：键盘连接/断开时显示"键盘已连接/已断开"
+- **Kconfig 选项 `USE_BLE_HID_KEYBOARD`**：esp32s3 目标默认开启，`select BT_ENABLED` + NimBLE 配置
+
+### fix
+- **BLE 连接内存泄漏**：开机自动扫描连接不可达键盘会泄漏 NimBLE 内存（free RAM 117KB→11KB，导致"检查新版本失败"和 HTTP 服务器启动失败）。修复：改为 `BTSCAN` 手动触发 + 连接失败清理 stale bond + 连接任务看门狗清理
+- **sdkconfig 漂移**：清理环境迁移残留的 esp32 配置，重新生成 esp32s3 目标（含 BLE HID 配置）
+
+### change
+- `sdkconfig.defaults.esp32s3`：新增 BLE/NimBLE/HID 配置（`BT_ENABLED`、`BT_NIMBLE_ENABLED`、`BT_NIMBLE_HID_SERVICE`、`ROLE_CENTRAL`、SM_SC/BONDING/NVS_PERSIST 等）
+- `main/version_info.cc` `kFeatures[]`：新增蓝牙键盘输入功能说明
+
+---
+
 ## 开发环境工具 — 2026-08-03（不涉及固件版本）
 
 > 纯开发工具/文档变更，**不 bump 固件版本**（`PROJECT_VER` 仍为 3.1.0），仅为记录环境自检与监控能力建设。

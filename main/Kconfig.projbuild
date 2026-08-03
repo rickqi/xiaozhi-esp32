@@ -706,6 +706,14 @@ menu "WiFi Configuration Method"
         select MBEDTLS_DHM_C
 endmenu
 
+config USE_BLE_HID_KEYBOARD
+    bool "Bluetooth HID Keyboard (BLE HID Host)"
+    depends on IDF_TARGET_ESP32S3
+    default y
+    select BT_ENABLED
+    help
+        Connect a BLE keyboard as input via esp_hid HID host (MVP: hotkeys).
+
 config AUDIO_DEBUG_UDP_SERVER
     string "Audio Debug UDP Server Address"
     default "192.168.2.100:8000"
