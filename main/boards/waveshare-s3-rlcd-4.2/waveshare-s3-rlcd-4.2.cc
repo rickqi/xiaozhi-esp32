@@ -2518,6 +2518,7 @@ private:
 
     static void SelfTestTask(void *arg) {
         auto board = (CustomBoard *)arg;
+        ESP_LOGI(TAG, "SelfTestTask started");
         board->RunSelfTestImpl();
         vTaskDelete(NULL);
     }
@@ -2528,7 +2529,13 @@ private:
             return;
         }
         self_test_running_ = true;
-        xTaskCreatePinnedToCore(SelfTestTask, "self_test", 8 * 1024, this, 3, NULL, 1);
+        // Use xTaskCreate (any core) so Core-1 tasks (esp_hidh events) do not
+        // starve the self-test task; raise priority to 8 to preempt BLE tasks.
+        BaseType_t rc = xTaskCreate(SelfTestTask, "self_test", 4 * 1024, this, 8, NULL);
+        if (rc != pdPASS) {
+            ESP_LOGE(TAG, "SelfTestTask creation failed: %d", (int)rc);
+            self_test_running_ = false;
+        }
     }
 
     void RunSelfTestImpl() {
@@ -2765,7 +2772,7 @@ public:
         InitializeLcdDisplay();
         InitializeAdc();
         InitializeSdLog();      // mount SD + tee logs to /sdcard/logs/
-        xTaskCreatePinnedToCore(ScreenshotCmdTask, "scr_cmd", 6 * 1024, this, 1, NULL, 1);
+        xTaskCreatePinnedToCore(ScreenshotCmdTask, "scr_cmd", 6 * 1024, this, 5, NULL, 1);
         xTaskCreatePinnedToCore(AutoScreenshotTask, "scr_auto", 6 * 1024, this, 1, NULL, 1);
         xTaskCreatePinnedToCore(SensorLogTask, "sensor_log", 4 * 1024, this, 1, NULL, 1);
 #if defined(RLCD_ENABLE_KEY_LEVEL_MONITOR) && RLCD_ENABLE_KEY_LEVEL_MONITOR

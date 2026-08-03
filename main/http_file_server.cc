@@ -59,6 +59,10 @@ bool HttpFileServer::Start(uint16_t port) {
     config.max_open_sockets = 4;
     config.lru_purge_enable = true;  // close least-recent connection when full
     config.stack_size = 8192;        // default 4096 too small for dir browse + file serve
+    // Allocate the httpd task stack from PSRAM: internal RAM is fragmented
+    // by BLE/WiFi activity and an 8KB internal allocation fails, breaking
+    // HTTPSTART after BLE scan/connect. PSRAM (8MB) is ample for the stack.
+    config.task_caps = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     config.recv_wait_timeout = 10;    // seconds (default 5)
     config.send_wait_timeout = 30;   // seconds (default 5, too short for multi-MB files)
     config.uri_match_fn = httpd_uri_match_wildcard;  // enable wildcard URI matching

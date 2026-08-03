@@ -357,15 +357,26 @@ int BluetoothKeyboard::GapEventCallback(struct ble_gap_event* event, void* arg) 
         return 0;
     }
     case BLE_GAP_EVENT_DISC_COMPLETE: {
-        if (ctx->keyboard_addr_found) {
-            ESP_LOGI(TAG, "Scan complete, connecting to keyboard...");
+        // If we have a pending keyboard from a previous scan, connect it now
+        // (second BTSCAN = explicit connect intent). Otherwise remember the
+        // first keyboard found.
+        if (ctx->self && ctx->self->has_pending_keyboard_) {
+            ESP_LOGI(TAG, "Scan complete, connecting to pending keyboard...");
+            ctx->self->ConnectAsync(ctx->self->pending_keyboard_addr_,
+                                    ctx->self->pending_keyboard_addr_type_);
+            ctx->self->has_pending_keyboard_ = false;
+        } else if (ctx->keyboard_addr_found) {
+            ESP_LOGI(TAG, "Scan complete. Keyboard found. Send BTSCAN again to connect...");
             if (ctx->self) {
-                // IMPORTANT: esp_hidh_dev_open() is BLOCKING (performs full GATT
-                // discovery + MTU exchange). Calling it from this GAP callback
-                // would stall the NimBLE host task and starve the audio/AFE
-                // tasks (observed as "AFE ringbuffer full" floods). Spawn a
-                // dedicated task instead.
-                ctx->self->ConnectAsync(ctx->keyboard_addr, ctx->keyboard_addr_type);
+                // IMPORTANT: Do NOT auto-connect here. esp_hidh_dev_open() is
+                // BLOCKING and on a reachable-but-not-pairing keyboard it
+                // hangs in GATT discovery, leaking ~17KB of NimBLE connection
+                // memory that breaks SELFTEST/HTTPSTART/screenshot. Instead
+                // remember the address; a second BTSCAN triggers the connect.
+                memcpy(ctx->self->pending_keyboard_addr_, ctx->keyboard_addr, 6);
+                ctx->self->pending_keyboard_addr_type_ = ctx->keyboard_addr_type;
+                ctx->self->has_pending_keyboard_ = true;
+                ESP_LOGI(TAG, "Pending keyboard saved; send BTSCAN again to connect");
             }
         } else {
             ESP_LOGI(TAG, "Scan complete, no keyboard found (reason=%d)",

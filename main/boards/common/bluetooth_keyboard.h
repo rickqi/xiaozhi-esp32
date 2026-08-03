@@ -92,6 +92,11 @@ private:
     esp_hidh_dev_t* dev_ = nullptr;
     bool bt_initialized_ = false;
 
+    // Pending keyboard address from a previous scan (connect on next BTSCAN).
+    uint8_t pending_keyboard_addr_[6] = {};
+    uint8_t pending_keyboard_addr_type_ = 0;
+    bool has_pending_keyboard_ = false;
+
     KeyCallback on_key_press_;
     Callback on_connect_;
     Callback on_disconnect_;
