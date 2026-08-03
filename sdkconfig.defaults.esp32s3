@@ -48,12 +48,12 @@ CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_SM_SC=y
 CONFIG_BT_NIMBLE_SM_BONDING=y
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
-# Pin NimBLE host task to Core 1 so it does not starve audio/AFE tasks
-# (which typically run on Core 0). Observed AFE ringbuffer overflow when
-# NimBLE shared Core 0 with audio.
-CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
 # Use PSRAM for NimBLE heap to free internal RAM for audio/AFE.
 # (workaround_bt_data.lf resolves the IDF 5.5.2 ldgen 'data' section bug
 #  that previously blocked MEM_ALLOC_MODE_EXTERNAL.)
 CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+# NimBLE host task on Core 0. Audio input task is pinned to Core 0 with
+# priority 8 (> NimBLE), so audio is not starved; board tasks (SELFTEST,
+# screenshot cmd) stay on Core 1. PSRAM handles the memory, so Core 0 is OK.
+CONFIG_BT_NIMBLE_PINNED_TO_CORE=0
 
