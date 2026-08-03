@@ -12,6 +12,7 @@
 
 #if CONFIG_BT_NIMBLE_ENABLED
 #include "host/ble_hs_adv.h"
+#include "host/ble_uuid.h"
 #include "services/gap/ble_svc_gap.h"
 #endif
 
@@ -318,18 +319,40 @@ int BluetoothKeyboard::GapEventCallback(struct ble_gap_event* event, void* arg) 
         if (rc != 0) {
             return 0;
         }
-        if (fields.appearance_is_present &&
-            fields.appearance == ESP_HID_APPEARANCE_KEYBOARD) {
-            ESP_LOGI(TAG, "Keyboard found: %02x:%02x:%02x:%02x:%02x:%02x (RSSI %d)",
-                     event->disc.addr.val[0], event->disc.addr.val[1],
-                     event->disc.addr.val[2], event->disc.addr.val[3],
-                     event->disc.addr.val[4], event->disc.addr.val[5],
-                     event->disc.rssi);
-            if (ctx->keyboard_addr_found == 0) {
-                memcpy(ctx->keyboard_addr, event->disc.addr.val, 6);
-                ctx->keyboard_addr_type = event->disc.addr.type;
-                ctx->keyboard_addr_found = 1;
+
+        // Extract device description from advertisement/scan-response data.
+        char name[64] = "?";
+        if (fields.name != nullptr) {
+            size_t n = fields.name_len < sizeof(name) - 1 ? fields.name_len : sizeof(name) - 1;
+            memcpy(name, fields.name, n);
+            name[n] = '\0';
+        }
+        uint16_t appearance = fields.appearance_is_present ? fields.appearance : 0;
+        bool is_keyboard = (appearance == ESP_HID_APPEARANCE_KEYBOARD);
+
+        ESP_LOGI(TAG,
+                 "BLE device: %02x:%02x:%02x:%02x:%02x:%02x  name='%s'  RSSI=%d  appearance=0x%04x%s",
+                 event->disc.addr.val[0], event->disc.addr.val[1],
+                 event->disc.addr.val[2], event->disc.addr.val[3],
+                 event->disc.addr.val[4], event->disc.addr.val[5],
+                 name, event->disc.rssi, appearance,
+                 is_keyboard ? "  [KEYBOARD]" : "");
+
+        // Also print advertised service UUIDs if present (e.g. HID 0x1812).
+        for (int i = 0; i < fields.num_uuids16; i++) {
+            uint16_t u = ble_uuid_u16(&fields.uuids16[i].u);
+            if (u == 0x1812) {
+                ESP_LOGI(TAG, "  -> advertises HID service (0x1812)");
+            } else {
+                ESP_LOGI(TAG, "  -> service UUID16: 0x%04x", u);
             }
+        }
+
+        if (is_keyboard && ctx->keyboard_addr_found == 0) {
+            ESP_LOGI(TAG, "Keyboard selected: %s", name);
+            memcpy(ctx->keyboard_addr, event->disc.addr.val, 6);
+            ctx->keyboard_addr_type = event->disc.addr.type;
+            ctx->keyboard_addr_found = 1;
         }
         return 0;
     }
