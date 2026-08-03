@@ -48,7 +48,12 @@ CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_SM_SC=y
 CONFIG_BT_NIMBLE_SM_BONDING=y
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
-# Note: MEM_ALLOC_MODE_EXTERNAL triggers IDF 5.5.2 ldgen bug
-# ('data' section undefined in bt_extram_bss fragment). Use internal.
-# CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL is not set
+# Pin NimBLE host task to Core 1 so it does not starve audio/AFE tasks
+# (which typically run on Core 0). Observed AFE ringbuffer overflow when
+# NimBLE shared Core 0 with audio.
+CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
+# Use PSRAM for NimBLE heap to free internal RAM for audio/AFE.
+# (workaround_bt_data.lf resolves the IDF 5.5.2 ldgen 'data' section bug
+#  that previously blocked MEM_ALLOC_MODE_EXTERNAL.)
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 
