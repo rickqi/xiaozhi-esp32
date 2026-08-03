@@ -66,15 +66,22 @@ CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_SM_SC=y
 CONFIG_BT_NIMBLE_SM_BONDING=y
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
-# Note: MEM_ALLOC_MODE_EXTERNAL triggers IDF 5.5.2 ldgen bug
-# ('data' section undefined in bt_extram_bss fragment). Use internal.
-# CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL is not set
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_BT_NIMBLE_PINNED_TO_CORE=1
 ```
 
 **关键项说明**：
 - `BT_NIMBLE_HID_SERVICE=y`：**必须**，否则 `nimble_hidh.c` 整文件被 `#if` 编译排除
+  （注意：它强制启用 GATT server，不可关闭 GATT_SERVER 省内存）
 - `BT_NIMBLE_ROLE_CENTRAL=y`：中心角色（Host，主动连接键盘）
-- `MEM_ALLOC_MODE_EXTERNAL` 不要开：触发 IDF 5.5.2 ldgen bug（见 §6）
+- **`MEM_ALLOC_MODE_EXTERNAL=y`：必须**——NimBLE 堆放 PSRAM，
+  否则协议栈（~40KB）挤占内部 RAM 导致音频 AFE 环形缓冲溢出
+  （实测：INTERNAL 时 AFE 溢出 1636 次/55s、空闲内存 12KB；
+  EXTERNAL 后 AFE 溢出 ~0、空闲内存 37KB）
+- **`PINNED_TO_CORE=1`：建议**——NimBLE 主机任务固定 Core 1，
+  避免与音频任务（Core 0）争抢 CPU
+- `BT_NIMBLE_HID_SERVICE` + `MEM_ALLOC_MODE_EXTERNAL` 依赖
+  `main/workaround_bt_data.lf` 修复的 ldgen bug（见 §6）
 
 > ⚠️ 不要参考 Waveshare FactoryProgram 的 `BT_ABORT_WHEN_ALLOCATION_FAILS` /
 > `BT_BLE_42_FEATURES_SUPPORTED`——它们 `depends on BT_BLUEDROID_ENABLED`，对 NimBLE 无效。
@@ -115,6 +122,9 @@ entries:
 ```cmake
 LINKER_FRAGMENTS workaround_bt_data.lf
 ```
+
+> **为何必须**：没有它，`MEM_ALLOC_MODE_EXTERNAL`（NimBLE→PSRAM，修复 AFE 溢出
+> 的关键配置）无法通过 ldgen。workaround 使 EXTERNAL 模式可用。
 定义 `data` 段别名使 scheme 可解析。
 
 **环境依赖陷阱**（跨机器构建注意）：
@@ -249,8 +259,9 @@ bt_keyboard_.OnKeyPress([this](uint8_t keycode, uint8_t modifier) {
 | 4 | 开机自动扫描泄漏 | 只手动 `BTSCAN` 触发 |
 | 5 | `BT_NIMBLE_HID_SERVICE` 未设 | 链接错误（nimble_hidh.c 被编译排除） |
 | 6 | `sm_mitm=1` + `NO_INPUT_OUTPUT` | 配对必失败，必须 `sm_mitm=0`（Just Works） |
-| 7 | `MEM_ALLOC_MODE_EXTERNAL` | IDF 5.5.2 ldgen bug，用 INTERNAL |
-| 8 | 键盘需进配对模式 | 广播≠可连接，需键盘按配对键（LED 快闪） |
+| 7 | 忘了 `MEM_ALLOC_MODE_EXTERNAL` | NimBLE 挤占内部 RAM 导致 AFE 溢出（用 INTERNAL 必踩） |
+| 8 | `MEM_ALLOC_MODE_EXTERNAL` 需 workaround | 必须注册 `workaround_bt_data.lf`（见 §6），否则 ldgen 失败 |
+| 9 | 键盘需进配对模式 | 广播≠可连接，需键盘按配对键（LED 快闪） |
 
 ### 9.3 可移植性说明
 
