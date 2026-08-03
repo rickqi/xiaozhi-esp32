@@ -25,19 +25,25 @@
 
 ### 1.1 烧录固件
 
-需要 ESP-IDF 5.4+ 环境。
+需要 ESP-IDF 5.4+ 环境（版本/路径/串口因机器而异，先自动检测，见 AGENTS.md「构建环境」章节）。
 
 ```bash
-# 选择目标板（菜单中勾选 waveshare-s3-rlcd-4.2）
+# 检测当前机器环境（IDF 路径 / Python env / 串口）
+python scripts/detect_env.py --export-ps1   # PowerShell 下可用；或直接看摘要
+
+# 激活 + 构建 + 烧录（端口用检测结果，示例为 Windows PowerShell）
+$env_out = python scripts/detect_env.py --export-ps1
+Invoke-Expression ($env_out -join "`n")
+& "$env:IDF_PATH\export.ps1"
 idf.py set-target esp32s3
 idf.py menuconfig
 idf.py build
-idf.py -p COM4 flash
+idf.py -p $env:XIAOZHI_PORT flash
 ```
 
 ### 1.2 串口连接
 
-- 通过 USB-C 连接电脑，设备枚举为 `USB JTAG/serial debug unit`（如 COM4）
+- 通过 USB-C 连接电脑，设备枚举为 `USB JTAG/serial debug unit`（串口号因机器而异，用 `python scripts/detect_env.py` 检测）
 - **主 console 已配置为 USB-Serial/JTAG**：日志输出与串口命令输入都走 USB-C 口，无需额外 USB 转串口模块
 - 波特率 `115200`
 

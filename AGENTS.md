@@ -10,35 +10,68 @@
 
 ---
 
-## 构建环境
+## 构建环境（多环境自动检测）
 
-| 项 | 值 |
-|---|---|
-| ESP-IDF | 5.5.2，路径 `C:\Users\szk220009\esp\esp-idf` |
-| Python env | `C:\Users\szk220009\.espressif\python_env\idf5.5_py3.13_env\Scripts\python.exe` |
-| 环境激活 | `& C:\Users\szk220009\esp\esp-idf\export.ps1`（PowerShell） |
-| 目标芯片 | `esp32s3` |
-| 串口 | **COM4**（USB-Serial/JTAG，非 UART 桥接） |
+> **本仓库不硬编码单机环境路径**（环境迁移/换机后路径、串口号、Python 版本都会变）。
+> 所有构建/烧录/串口操作前，**先运行 `scripts/detect_env.py` 检测当前机器的真实环境**。
+
+### 环境检测（每个会话/每台新机器必做）
 
 ```powershell
-# 激活 + 构建
-& C:\Users\szk220009\esp\esp-idf\export.ps1
-idf.py build
-idf.py -p COM4 flash
-idf.py -p COM4 monitor   # 或用 pyserial 直接发命令（见下）
+python scripts/detect_env.py              # 人类可读摘要：IDF 路径/版本、Python env、串口
+python scripts/detect_env.py --json       # JSON 输出（供脚本/agent 消费）
+python scripts/detect_env.py --check      # 与 scripts/env_expect.json 快照对比，判定环境冲突（exit 2=有差异）
+python scripts/detect_env.py --health     # 健康检查：验证是否满足开发/调试/烧录要求（exit 2=不满足）
+python scripts/detect_env.py --export-ps1 # 生成 PowerShell 变量赋值，可直接执行/落盘
 ```
 
-> **注意**：`idf.py monitor` 会独占 COM4，烧录前必须先终止 monitor 进程。
+**检测优先级**（脚本内实现）：环境变量 `IDF_PATH` > 官方安装器元数据 `~/.espressif/idf-env.json` > 常见安装路径探测。
+**串口识别**：优先匹配 Espressif USB-Serial/JTAG（VID `0x303A`，即本板调试口），其次 USB-UART 桥接芯片。
 
-**串口命令测试**（不阻塞，适合自动化验证）：
+**`--health` 检查项（10 项）**：IDF 路径/版本、Python venv 存在性、venv 版本标记匹配（`idf_version.txt`）、Python 依赖满足 IDF 约束（`idf_tools.py check-python-dependencies`）、工具链（`idf_tools.py check`）、串口可打开、**sdkconfig 芯片/板/console/FATFS/唤醒词配置**、分区表、构建产物。任一 FAIL 即 exit 2。
+
+> **sdkconfig 漂移陷阱**：环境迁移后 `sdkconfig` 可能是别的目标/板的旧配置（例如 esp32 + bread-compact-esp32，而本板是 esp32s3 + waveshare-s3-rlcd-4.2）。此时 `idf.py build` 会"成功"但编译的是错误板！务必先 `python scripts/detect_env.py --health` 确认 `sdkconfig 芯片/板` 项 PASS；否则执行 `idf.py set-target esp32s3` 重新生成。
+
+### 标准工作流（激活 + 构建 + 烧录）
+
 ```powershell
-& "C:\Users\szk220009\.espressif\python_env\idf5.5_py3.13_env\Scripts\python.exe" -c "
+# 1. 检测并导出环境变量（每台机器自动识别，无需手动改端口/路径）
+$env_out = python scripts/detect_env.py --export-ps1
+Invoke-Expression ($env_out -join "`n")  # 设置 $env:IDF_PATH / $env:XIAOZHI_PORT 等
+
+# 2. 激活 ESP-IDF（路径来自检测结果）
+& "$env:IDF_PATH\export.ps1"
+
+# 3. 构建 + 烧录 + 监控（端口来自检测结果）
+idf.py build
+idf.py -p $env:XIAOZHI_PORT flash
+idf.py -p $env:XIAOZHI_PORT monitor
+```
+
+> **注意**：`idf.py monitor` 会独占串口，烧录前必须先终止 monitor 进程。
+
+### 串口命令测试（不阻塞，适合自动化验证）
+
+```powershell
+# 用检测到的 Python 解释器（保证含 pyserial）+ 检测到的串口
+& "$env:IDF_PYTHON_ENV_PATH\Scripts\python.exe" -c "
 import serial, time
-s = serial.Serial('COM4', 115200, timeout=0.3)
+s = serial.Serial('$env:XIAOZHI_PORT', 115200, timeout=0.3)
 time.sleep(0.3); s.read(4096)  # drain
 s.write(b'CHATLOGLIST\n'); s.flush(); time.sleep(3); print(s.read(4096).decode('utf-8','replace'))
 "
 ```
+
+### 多环境迁移 / 冲突判定
+
+| 场景 | 处理方式 |
+|---|---|
+| 换电脑 / IDF 重装 / 串口变化 | 重跑 `detect_env.py --check`，exit 2 表示与快照不一致 |
+| 快照过时 | 以 `detect_env.py` 检测结果为准，确认后更新 `scripts/env_expect.json`（`_更新时间` 一并改） |
+| 多台机器共用仓库 | 每台机器各自运行检测即可，`env_expect.json` 只记录"上次验证"的机器 |
+| 检测不到串口 | 手动指定：`idf.py -p COMx flash`；检查设备是否枚举为 USB-Serial/JTAG |
+
+> 版本号/固件相关信息（`PROJECT_VER`、`GIT_COMMIT`）由构建系统注入，与机器无关，不受环境迁移影响。
 
 ---
 
@@ -173,7 +206,7 @@ ReturnValue 类型：`std::variant<bool, int, std::string, cJSON*, ImageContent*
 
 ## 常见陷阱
 
-1. **COM4 被占用** → 烧录失败"port is busy"：终止残留 monitor 进程后重试
+1. **串口被占用** → 烧录失败"port is busy"：终止残留 monitor 进程后重试（端口见 `detect_env.py` 检测结果）
 2. **PowerShell commit message** → 圆括号/反引号被解析：用 `git commit -F <文件>`
 3. **`ReadShtc3` 未使用警告**（lcd_display.cc:1004）→ 预先存在，非新增，不需修复
 4. **第三方警告**（esp_video/ioctl.h `_IO` redefined）→ 预先存在，忽略

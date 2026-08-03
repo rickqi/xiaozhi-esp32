@@ -6,6 +6,28 @@
 
 ---
 
+## 开发环境工具 — 2026-08-03（不涉及固件版本）
+
+> 纯开发工具/文档变更，**不 bump 固件版本**（`PROJECT_VER` 仍为 3.1.0），仅为记录环境自检与监控能力建设。
+
+### feat（开发工具）
+- **新增 `scripts/detect_env.py` 多环境自检工具**：解决环境迁移后 AGENTS.md/文档中硬编码路径（COM 口、IDF 路径、Python env）失效的问题
+  - `detect_env.py`（默认）：人类可读摘要——IDF 路径/版本、Python 虚拟环境、设备串口、项目版本、git 提交
+  - `--json`：结构化输出（供脚本/agent 消费）
+  - `--check`：与 `scripts/env_expect.json` 快照对比，判定环境冲突（换机/IDF 重装/串口变化 → exit 2）
+  - `--health`：**10 项健康检查**，验证环境是否满足开发/调试/烧录要求（任一 FAIL → exit 2）
+  - `--export-ps1`：生成 PowerShell 环境变量赋值（`$env:IDF_PATH` / `$env:XIAOZHI_PORT` 等），一键激活
+- **新增 `scripts/env_expect.json` 环境快照基准**：记录"上次验证"的机器环境，供 `--check` 冲突判定
+- **检测机制**：IDF 路径优先级（`IDF_PATH` 环境变量 > `~/.espressif/idf-env.json` 安装器元数据 > 常见路径探测）；串口优先识别 Espressif USB-Serial/JTAG（VID `0x303A`）
+
+### change（文档/监控要求）
+- **AGENTS.md 构建环境章节重写**：环境信息不再硬编码，改为检测驱动标准工作流（检测 → 导出变量 → 激活 → 构建/烧录/监控）
+- **新增 sdkconfig 漂移陷阱警示**：环境迁移后 `sdkconfig` 可能残留其他目标/板的旧配置（如 esp32+bread-compact 而本板是 esp32s3+waveshare-s3-rlcd-4.2），`idf.py build` 会"成功"但编译错误板——必须先用 `--health` 确认 `sdkconfig 芯片/板` 项 PASS
+- **文档去硬编码**：`docs/usage.md`、`docs/optimization-plan.md`、板 `README.md`、`CHANGELOG.md` 中所有 `COM4` / 绝对路径替换为检测驱动命令
+- **串口监控要求（不更新固件）**：通过 COM 实时日志（温湿度/系统事件/错误）、串口命令（`SELFTEST`/`LOG`/`SYSLOGLIST`/`CHATLOGLIST`/`LIST`/`HTTPSTART`）、HTTP 远程监控（同网段，10 分钟自动关闭）三种方式监控设备状态；判定正常基准见 AGENTS.md
+
+---
+
 ## v3.1.0 — 2026-08-03
 
 ### feat
@@ -32,9 +54,12 @@
 
 ### 烧录步骤
 ```powershell
-& C:\Users\szk220009\esp\esp-idf\export.ps1
-idf.py -p COM4 erase-otadata
-idf.py -p COM4 flash
+# 端口/路径因机器而异，先自动检测（见 AGENTS.md 构建环境章节）
+$env_out = python scripts/detect_env.py --export-ps1
+Invoke-Expression ($env_out -join "`n")
+& "$env:IDF_PATH\export.ps1"
+idf.py -p $env:XIAOZHI_PORT erase-otadata
+idf.py -p $env:XIAOZHI_PORT flash
 ```
 
 ---

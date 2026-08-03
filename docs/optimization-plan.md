@@ -70,7 +70,7 @@
 | # | 风险 | 严重度 | 概率 | 影响 | 缓解措施 |
 |---|---|---|---|---|---|
 | R1 | **OTA 断裂**：旧固件无法 OTA 到新分区布局 | 🔴 高 | 100%（必然） | 用户必须 USB 重新烧录，无法远程升级 | 文档明确标注 v3.0.0 需 USB 烧录；推送通知 |
-| R2 | **otadata 错乱**：otadata 指向旧偏移的分区 | 🔴 高 | 高 | 设备启动黑屏/无法引导 | 烧录时执行 `idf.py -p COM4 erase-otadata` 或 `esptool erase_region 0xd000 0x2000` |
+| R2 | **otadata 错乱**：otadata 指向旧偏移的分区 | 🔴 高 | 高 | 设备启动黑屏/无法引导 | 烧录时执行 `idf.py -p <检测到的串口> erase-otadata`（端口用 `scripts/detect_env.py` 检测）或 `esptool erase_region 0xd000 0x2000` |
 | R3 | **Assets 数据丢失**：SPIFFS 偏移变化导致文件系统失效 | 🟡 中 | 100%（必然） | 唤醒词/字体/表情丢失，首次启动需联网下载 | 设备首次启动自动从服务器下载 assets；如有自定义 assets 需备份 |
 | R4 | **对齐违规**：分区偏移未按 64KB 对齐 | 🟢 低 | 已排除 | 编译期 check_sizes.py 会报错 | 0x960000 是 0x10000 的整数倍 ✓ |
 | R5 | **Assets 余量不足**：未来 assets 增长超过 6.63MB | 🟢 低 | 低 | assets 下载失败 | 当前仅用 2.66MB，6.63MB 足够支撑 2x 增长 |

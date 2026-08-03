@@ -146,12 +146,15 @@ I (21836) waveshare_rlcd_4_2: SELFTEST SelfTest: 7/7 ALL PASS
 ## 构建与烧录
 
 ```bash
-# 需 ESP-IDF 5.4+，选择目标板
+# 需 ESP-IDF 5.4+，选择目标板。路径/端口因机器而异，先自动检测（见仓库 AGENTS.md）
+$env_out = python scripts/detect_env.py --export-ps1
+Invoke-Expression ($env_out -join "`n")
+& "$env:IDF_PATH\export.ps1"
 idf.py set-target esp32s3
 # 菜单中选中 CONFIG_BOARD_TYPE_WAVESHARE_S3_RLCD_4_2
 idf.py menuconfig
 idf.py build
-idf.py -p COM4 flash monitor
+idf.py -p $env:XIAOZHI_PORT flash monitor
 ```
 
 ---

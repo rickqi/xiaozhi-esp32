@@ -2206,7 +2206,7 @@ private:
         vTaskDelay(pdMS_TO_TICKS(12000));
         ESP_LOGI(TAG, "Auto screenshot after boot");
         board->TakeScreenshot();
-        // Dump SD log to serial so recent button events are visible on COM4
+        // Dump SD log to serial so recent button events are visible on the console
         vTaskDelay(pdMS_TO_TICKS(500));
         board->DumpSdLog();
         vTaskDelete(NULL);

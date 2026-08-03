@@ -1,0 +1,10 @@
+{
+    "_说明": "本文件记录『上次验证的开发环境』快照，供 scripts/detect_env.py --check 判定环境冲突。环境迁移/换机后运行 `python scripts/detect_env.py --check` 会提示差异；确认无误后更新本文件。",
+    "_更新时间": "2026-08-03",
+    "idf_path": "D:\\esp\\esp-idf",
+    "idf_version": "v5.5.2",
+    "python_env_path": "C:\\Users\\szk220009\\.espressif\\python_env\\idf5.5_py3.11_env",
+    "port": "COM3",
+    "project_version": "3.1.0",
+    "os": "Windows"
+}
