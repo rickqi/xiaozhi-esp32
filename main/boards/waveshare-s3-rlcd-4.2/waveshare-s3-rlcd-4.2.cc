@@ -2213,7 +2213,13 @@ private:
         int row_bytes = (w + 7) / 8;
         int hdr_len = snprintf(NULL, 0, "P4\n%d %d\n", w, h);
         int pbm_size = hdr_len + row_bytes * h;
-        uint8_t *pbm = (uint8_t *)heap_caps_malloc(pbm_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        // Use PSRAM when available: internal RAM is tight with WiFi+BLE+audio.
+        // (MALLOC_CAP_SPIRAM falls back gracefully; 8MB PSRAM is ample for 15KB.)
+        uint8_t *pbm = (uint8_t *)heap_caps_malloc(pbm_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!pbm) {
+            // Fallback to any memory (internal) if PSRAM allocation failed.
+            pbm = (uint8_t *)heap_caps_malloc(pbm_size, MALLOC_CAP_8BIT);
+        }
         if (!pbm) {
             printf("SCREENSHOT_ERROR: out of memory\n");
             return;
@@ -2234,7 +2240,10 @@ private:
         }
         size_t b64_len = 0;
         mbedtls_base64_encode(NULL, 0, &b64_len, pbm, pbm_size);
-        uint8_t *b64 = (uint8_t *)malloc(b64_len + 1);
+        uint8_t *b64 = (uint8_t *)heap_caps_malloc(b64_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!b64) {
+            b64 = (uint8_t *)malloc(b64_len + 1);
+        }
         if (!b64) {
             free(pbm);
             printf("SCREENSHOT_ERROR: base64 alloc\n");
