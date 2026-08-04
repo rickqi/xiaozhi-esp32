@@ -2392,9 +2392,11 @@ private:
                 } else if (strcmp(line, "LIST") == 0) {
                     ESP_LOGI(TAG, "List recordings requested via serial");
                     board->ListRecordings();
-                } else if (strcmp(line, "LOG") == 0) {
-                    ESP_LOGI(TAG, "Dump SD log requested via serial");
-                    board->DumpSdLog();
+                } else if (strcmp(line, "LOG") == 0 || strcmp(line, "LOG BLE") == 0 ||
+                           strcmp(line, "LOGBLE") == 0) {
+                    bool ble_log = (strstr(line, "BLE") != nullptr);
+                    ESP_LOGI(TAG, "Dump SD %s log requested via serial", ble_log ? "BLE" : "");
+                    board->DumpSdLog(ble_log);
                 } else if (strcmp(line, "SELFTEST") == 0) {
                     ESP_LOGI(TAG, "Self-test requested via serial");
                     board->RunSelfTest();
@@ -2450,19 +2452,37 @@ private:
     }
 
     // Dump the current SD log file contents over serial (for diagnostics)
-    void DumpSdLog() {
-        if (!sdcard_mounted_ || log_path_[0] == '\0') {
-            printf("SDLOG: no log file (SD not mounted?)\n");
+    void DumpSdLog(bool ble_log = false) {
+        // ble_log=true dumps the independent BLE keyboard log
+        // (ble_YYYYMMDD.txt); otherwise dumps the system log (log_YYYYMMDD.txt).
+        if (!sdcard_mounted_) {
+            printf("SDLOG: no SD card\n");
             fflush(stdout);
             return;
         }
-        FILE *f = fopen(log_path_, "r");
+        char path[64];
+        if (ble_log) {
+            // Construct the BLE log path dynamically: it may not have been
+            // lazily opened yet (no ble_keyboard log line since boot).
+            time_t now = time(NULL);
+            struct tm tm;
+            localtime_r(&now, &tm);
+            if (tm.tm_year < 100) {
+                snprintf(path, sizeof(path), "/sdcard/logs/ble_00000000.txt");
+            } else {
+                snprintf(path, sizeof(path), "/sdcard/logs/ble_%04d%02d%02d.txt",
+                         tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+            }
+        } else {
+            snprintf(path, sizeof(path), "%s", log_path_[0] ? log_path_ : "/sdcard/logs/log_00000000.txt");
+        }
+        FILE *f = fopen(path, "r");
         if (!f) {
-            printf("SDLOG: cannot open %s errno=%d\n", log_path_, errno);
+            printf("SDLOG: cannot open %s errno=%d\n", path, errno);
             fflush(stdout);
             return;
         }
-        printf("SDLOG_START %s\n", log_path_);
+        printf("SDLOG_START %s\n", path);
         char line[256];
         while (fgets(line, sizeof(line), f) != NULL) {
             printf("%s", line);

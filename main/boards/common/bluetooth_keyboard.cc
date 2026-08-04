@@ -278,7 +278,7 @@ void BluetoothKeyboard::HandleBootReport(const uint8_t* data, uint16_t len,
 }
 
 char BluetoothKeyboard::KeycodeToAscii(uint8_t keycode, bool shift) {
-    // USB HID Usage Table 1.12 â€” Keyboard/Keypad page (0x07)
+    // USB HID Usage Table 1.12 â€?Keyboard/Keypad page (0x07)
     if (keycode >= 0x04 && keycode <= 0x1D) {  // a-z
         char base = 'a' + (keycode - 0x04);
         return shift ? (char)(base - 32) : base;
