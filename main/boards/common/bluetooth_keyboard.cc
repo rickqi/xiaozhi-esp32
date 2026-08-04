@@ -4,6 +4,7 @@
 
 #include "esp_bt.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_nimble_hci.h"
 #include "host/ble_gap.h"
 #include "host/ble_hs.h"
@@ -191,8 +192,9 @@ void BluetoothKeyboard::Connect(const uint8_t* bda, uint8_t addr_type) {
 void BluetoothKeyboard::Disconnect() {
     if (dev_) {
         esp_hidh_dev_close(dev_);
-        // esp_hidh_dev_free must be called on CLOSE_EVENT; but on explicit
-        // disconnect we free immediately to avoid dangling pointer.
+        // Free immediately and clear dev_. The async CLOSE_EVENT handler
+        // checks `self->dev_ == dev` before freeing, so when we cleared
+        // dev_ here the event handler will skip its free â€” no double-free.
         esp_hidh_dev_free(dev_);
         dev_ = nullptr;
         if (on_disconnect_) {
@@ -238,9 +240,15 @@ void BluetoothKeyboard::EventHandler(void* handler_args, esp_event_base_t base,
         ESP_LOGI(TAG, "CLOSE: reason=%d", param->close.reason);
         esp_hidh_dev_t* dev = param->close.dev;
         if (self->dev_ == dev) {
+            // Normal (remote/async) disconnect: dev_ still points at the
+            // device, so we own the free here.
             self->dev_ = nullptr;
+            esp_hidh_dev_free(dev);  // MUST free in CLOSE handler
+        } else {
+            // Explicit Disconnect() already freed the device and cleared
+            // dev_. Skip to avoid double-free.
+            ESP_LOGI(TAG, "CLOSE: dev already freed by explicit Disconnect");
         }
-        esp_hidh_dev_free(dev);  // MUST free in CLOSE handler
         if (self->on_disconnect_) {
             self->on_disconnect_();
         }
@@ -278,7 +286,7 @@ void BluetoothKeyboard::HandleBootReport(const uint8_t* data, uint16_t len,
 }
 
 char BluetoothKeyboard::KeycodeToAscii(uint8_t keycode, bool shift) {
-    // USB HID Usage Table 1.12 â€?Keyboard/Keypad page (0x07)
+    // USB HID Usage Table 1.12 ï¿½?Keyboard/Keypad page (0x07)
     if (keycode >= 0x04 && keycode <= 0x1D) {  // a-z
         char base = 'a' + (keycode - 0x04);
         return shift ? (char)(base - 32) : base;
@@ -460,13 +468,35 @@ void BluetoothKeyboard::ConnectAsync(const uint8_t* bda, uint8_t addr_type) {
     auto* addr = new uint8_t[6];
     memcpy(addr, bda, 6);
     auto* task = new ConnectTaskArgs{this, addr, addr_type};
-    xTaskCreate(ConnectTask, "kbd_connect", 6 * 1024, task, 3, nullptr);
+    // Check the task-creation result: on failure (internal RAM fragmented),
+    // release the just-allocated args instead of leaking them, and keep the
+    // pending keyboard address so the user can retry with another BTSCAN.
+    BaseType_t rc = xTaskCreate(ConnectTask, "kbd_connect", 6 * 1024, task, 3, nullptr);
+    if (rc != pdPASS) {
+        ESP_LOGE(TAG, "Connect: kbd_connect task creation failed (%d)", (int)rc);
+        delete[] addr;
+        delete task;
+    }
 }
 
 void BluetoothKeyboard::ConnectTask(void* arg) {
     auto* args = static_cast<ConnectTaskArgs*>(arg);
     BluetoothKeyboard* self = args->self;
     if (self) {
+        // Pre-connect memory guard: esp_hidh_dev_open() performs a blocking
+        // GATT discovery that needs ~10KB of internal RAM (esp_hid uses plain
+        // malloc, NOT the PSRAM alloc mode that covers NimBLE itself). With
+        // only ~20KB free internally, a concurrent display/audio allocation
+        // can push us into ESP_ERR_NO_MEM and crash (ESP_ERROR_CHECK).
+        size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        if (free_internal < 15000) {
+            ESP_LOGE(TAG, "Insufficient internal RAM (%u B < 15000), aborting connect", (unsigned)free_internal);
+            delete[] args->bda;
+            delete args;
+            vTaskDelete(nullptr);
+            return;
+        }
+
         // esp_hidh_dev_open() blocks for up to ~30s (ble_gap_connect timeout).
         // If the keyboard is not in pairing mode, it hangs until then and the
         // NimBLE connection context is retained, leaking memory. Watchdog:
@@ -476,10 +506,23 @@ void BluetoothKeyboard::ConnectTask(void* arg) {
         // Give the esp_hidh event loop a moment to settle, then clean up.
         vTaskDelay(pdMS_TO_TICKS(200));
 #ifdef CONFIG_BT_NIMBLE_ENABLED
-        // 0x13 = Remote User Terminated Connection (HCI error code)
-        int rc = ble_gap_terminate(BLE_HS_CONN_HANDLE_NONE, 0x13);
-        if (rc != 0 && rc != BLE_HS_ENOTCONN) {
-            ESP_LOGI(TAG, "Connect cleanup: ble_gap_terminate rc=%d", rc);
+        // Clean up any stale NimBLE connection to this peer. The previous
+        // code used BLE_HS_CONN_HANDLE_NONE (0xFFFF = invalid) which ALWAYS
+        // failed, leaking the connection context. With
+        // CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1, one leaked connection blocks
+        // every subsequent ble_gap_connect() -> ESP_ERR_NO_MEM (0x101) crash
+        // on the second connect attempt. Look up the real handle by address.
+        ble_addr_t peer;
+        memcpy(peer.val, args->bda, 6);
+        peer.type = args->addr_type;
+        struct ble_gap_conn_desc desc;
+        int rc = ble_gap_conn_find_by_addr(&peer, &desc);
+        if (rc == 0 && desc.conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+            ESP_LOGI(TAG, "Terminating stale BLE connection handle=%u", desc.conn_handle);
+            // 0x13 = Remote User Terminated Connection (HCI error code)
+            ble_gap_terminate(desc.conn_handle, 0x13);
+        } else if (rc != BLE_HS_ENOTCONN) {
+            ESP_LOGI(TAG, "Connect cleanup: no stale conn (rc=%d)", rc);
         }
 #endif
     }
