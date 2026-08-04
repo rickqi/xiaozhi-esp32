@@ -6,6 +6,19 @@
 
 ---
 
+## v3.4.0 — 2026-08-04
+
+### feat
+- **状态栏蓝牙图标**：顶部状态栏 WiFi 图标旁新增 BLE 状态图标，随蓝牙状态变化
+  - 已连接：显示蓝牙图标（`FONT_AWESOME_BLUETOOTH`）
+  - 扫描中：显示旋转图标（`FONT_AWESOME_SPINNER`）
+  - 断开/未连接：隐藏图标
+  - 实现：`LcdDisplay::SetBluetoothIcon()`（Display 抽象类 + LcdDisplay 实现）；`InitializeKeyboard()` 的 OnConnect/OnDisconnect 回调 + `KeyboardScanNow()` 驱动图标更新（经 `Application::Schedule` 主线程安全更新）
+  - 布局：WiFi + 蓝牙图标包装在 `left_icons` flex 容器（与右侧 mute/battery 对称），`SPACE_BETWEEN` 保持左侧成组
+  - 已验证：截图确认 WiFi 图标旁蓝牙标志正常渲染
+
+---
+
 ## v3.3.4 — 2026-08-04
 
 ### fix

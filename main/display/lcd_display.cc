@@ -835,11 +835,29 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_scrollbar_mode(top_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(top_bar_, LV_ALIGN_TOP_MID, 0, 0);
 
-    // Left icon
-    network_label_ = lv_label_create(top_bar_);
+    // Left icons container: WiFi icon + BLE status icon (grouped so
+    // SPACE_BETWEEN keeps them together on the left side of the bar).
+    lv_obj_t* left_icons = lv_obj_create(top_bar_);
+    lv_obj_set_size(left_icons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(left_icons, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(left_icons, 0, 0);
+    lv_obj_set_style_pad_all(left_icons, 0, 0);
+    lv_obj_set_flex_flow(left_icons, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(left_icons, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // WiFi icon
+    network_label_ = lv_label_create(left_icons);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
+
+    // BLE status icon (hidden by default = disconnected/absent)
+    bluetooth_label_ = lv_label_create(left_icons);
+    lv_label_set_text(bluetooth_label_, "");
+    lv_obj_set_style_text_font(bluetooth_label_, icon_font, 0);
+    lv_obj_set_style_text_color(bluetooth_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_left(bluetooth_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_add_flag(bluetooth_label_, LV_OBJ_FLAG_HIDDEN);
 
     // Right icons container
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
@@ -1137,6 +1155,26 @@ void LcdDisplay::UpdateStatusBar(bool update_all) {
         if (status_label_ != nullptr) {
             lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
         }
+    }
+}
+
+// Update the BLE status icon next to the WiFi icon in the top bar.
+// icon == nullptr or "" hides the icon (disconnected/absent).
+// Driven by BLE connect/disconnect/scan callbacks (event-driven, not polled).
+void LcdDisplay::SetBluetoothIcon(const char* icon) {
+    if (bluetooth_label_ == nullptr) {
+        return;
+    }
+    DisplayLockGuard lock(this);
+    if (icon != nullptr && icon[0] != '\0') {
+        if (bluetooth_icon_ == nullptr || strcmp(bluetooth_icon_, icon) != 0) {
+            bluetooth_icon_ = icon;
+            lv_label_set_text(bluetooth_label_, bluetooth_icon_);
+        }
+        lv_obj_remove_flag(bluetooth_label_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(bluetooth_label_, LV_OBJ_FLAG_HIDDEN);
+        bluetooth_icon_ = nullptr;
     }
 }
 

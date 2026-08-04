@@ -40,6 +40,10 @@ public:
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
 
+    // Set/clear the BLE status icon in the top bar (default: no-op).
+    // icon: FontAwesome glyph string, or ""/nullptr to hide.
+    virtual void SetBluetoothIcon(const char* icon) { (void)icon; }
+
     inline int width() const { return width_; }
     inline int height() const { return height_; }
 

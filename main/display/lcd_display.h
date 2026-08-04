@@ -35,6 +35,8 @@ protected:
     lv_obj_t* status_icon_label_ = nullptr;
     lv_obj_t* status_icon_row_ = nullptr;
     lv_obj_t* sensor_value_label_ = nullptr;
+    lv_obj_t* bluetooth_label_ = nullptr;  // BLE status icon next to WiFi icon
+    const char* bluetooth_icon_ = nullptr;  // current glyph (dedup)
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
@@ -54,6 +56,10 @@ public:
     virtual void SetChatMessage(const char* role, const char* content) override; 
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
     virtual void UpdateStatusBar(bool update_all = false) override;
+
+    // Set/clear the BLE status icon next to the WiFi icon in the top bar.
+    // icon: FontAwesome glyph (e.g. FONT_AWESOME_BLUETOOTH) or ""/nullptr to hide.
+    void SetBluetoothIcon(const char* icon) override;
 
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;

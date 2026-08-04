@@ -36,8 +36,8 @@
 #include "version_info.h"
 #include "http_file_server.h"
 #include "lvgl.h"
-// ESP Audio Codec (espressif/esp_audio_codec) - MP3/AAC/M4A decoding
 #include "esp_audio_simple_dec.h"
+#include <font_awesome.h>
 #include "esp_audio_simple_dec_default.h"
 #include "esp_audio_dec_default.h"
 #include "decoder/impl/esp_aac_dec.h"
@@ -308,17 +308,26 @@ private:
             });
         });
         bt_keyboard_.OnConnect([this]() {
-            auto display = Board::GetInstance().GetDisplay();
-            if (display) {
-                display->ShowNotification("键盘已连接", 3000);
-            }
+            auto& app_ref = Application::GetInstance();
+            app_ref.Schedule([]() {
+                // BLE connected: show solid bluetooth icon next to WiFi.
+                auto display = Board::GetInstance().GetDisplay();
+                if (display) {
+                    display->SetBluetoothIcon(FONT_AWESOME_BLUETOOTH);
+                    display->ShowNotification("键盘已连接", 3000);
+                }
+            });
             ESP_LOGI(TAG, "BLE keyboard connected");
         });
         bt_keyboard_.OnDisconnect([this]() {
-            auto display = Board::GetInstance().GetDisplay();
-            if (display) {
-                display->ShowNotification("键盘已断开", 3000);
-            }
+            auto& app_ref = Application::GetInstance();
+            app_ref.Schedule([]() {
+                auto display = Board::GetInstance().GetDisplay();
+                if (display) {
+                    display->SetBluetoothIcon(nullptr);  // hide BLE icon
+                    display->ShowNotification("键盘已断开", 3000);
+                }
+            });
             ESP_LOGI(TAG, "BLE keyboard disconnected");
         });
         // NOTE: No auto-scan at boot. Auto-connecting to nearby keyboards that
@@ -331,6 +340,14 @@ private:
     void KeyboardScanNow() {
 #if CONFIG_USE_BLE_HID_KEYBOARD
         ESP_LOGI(TAG, "BLE keyboard scan requested");
+        // Show spinning BLE icon while scanning; cleared on connect/disconnect.
+        auto& app_ref = Application::GetInstance();
+        app_ref.Schedule([]() {
+            auto display = Board::GetInstance().GetDisplay();
+            if (display) {
+                display->SetBluetoothIcon(FONT_AWESOME_SPINNER);
+            }
+        });
         bt_keyboard_.StartScan(10);
 #endif
     }
