@@ -6,6 +6,15 @@
 
 ---
 
+## v3.3.4 — 2026-08-04
+
+### fix
+- **修复蓝牙键盘配对不持久化**（重启后需重新配对）：`HostInit()` 未调用 `ble_store_config_init()`，导致 `ble_hs_cfg` 的 store 回调为 NULL——即使 `CONFIG_BT_NIMBLE_NVS_PERSIST=y`，绑定密钥也不写入 NVS（store 操作全部返回 `BLE_HS_ENOTSUP`，启动日志出现 `Failed to restore IRKs from store; status=8`）
+  - 修复：`HostInit()` 在 `esp_nimble_enable()` 前调用 `ble_store_config_init()`（`extern "C"` 声明，匹配 libbt.a 的 C 符号）
+  - 效果：键盘配对后重启仍保留绑定信息，无需重新配对
+
+---
+
 ## v3.3.3 — 2026-08-04
 
 ### fix
