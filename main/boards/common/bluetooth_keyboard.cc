@@ -15,6 +15,11 @@
 #include "host/ble_hs_adv.h"
 #include "host/ble_uuid.h"
 #include "services/gap/ble_svc_gap.h"
+
+// Persist NimBLE bonding keys to NVS. The header is not exposed by the
+// ESP-IDF NimBLE component, so declare with C linkage (matches official
+// NimBLE examples which forward-declare it before calling in app init).
+extern "C" void ble_store_config_init(void);
 #endif
 
 #define TAG "ble_keyboard"
@@ -83,6 +88,13 @@ esp_err_t BluetoothKeyboard::HostInit() {
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_mitm = 0;   // MUST be 0 for NO_INPUT_OUTPUT
     ble_hs_cfg.sm_sc = 1;     // LE Secure Connections
+
+    // Persist bonding keys to NVS. This wires ble_hs_cfg.store_read_cb /
+    // store_write_cb / store_delete_cb to the NVS-backed store so a paired
+    // keyboard is remembered across reboots (auto-reconnect without re-pair).
+    // Without this, CONFIG_BT_NIMBLE_NVS_PERSIST=y has no effect: bonds live
+    // only in RAM and are lost on restart ("Failed to restore IRKs from store").
+    ble_store_config_init();
 
     esp_err_t ret = esp_nimble_enable((void*)NimbleHostTask);
     if (ret) {
