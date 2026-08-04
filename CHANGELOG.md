@@ -6,6 +6,21 @@
 
 ---
 
+## v3.2.1 — 2026-08-04
+
+### fix
+- **修复开机"发送失败"（TLS 内存分配失败）**：启动早期（AFE 初始化 + WiFi 连接 + MQTT 激活并发峰值）内部 DMA RAM 耗尽，导致 `esp-aes: Failed to allocate memory` → MQTT/HTTP 发送失败
+  - `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN` 16384→8192：硬件 AES DMA 暂存缓冲与记录大小成正比，减半后大幅降低启动期 DMA 内存需求
+  - `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` 512→256：减少小分配挤占内部 DMA 池，降低碎片化
+  - `CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y`：握手后释放对端证书（省 1-2KB）
+- **BLE 键盘两段式连接**：BTSCAN 第一次只记录键盘地址，第二次才连接——避免每次扫描自动连接不可达键盘泄漏 ~17KB NimBLE 内存
+- **BTSCAN 调试日志**：StartScan/DISC_COMPLETE 打印 pending 状态（诊断用）
+
+### change
+- 设备启动期内存峰值优化：通过 TLS 缓冲调优 + PSRAM 分散分配，启动不再因内存不足导致发送失败
+
+---
+
 ## v3.2.0 — 2026-08-03
 
 ### feat

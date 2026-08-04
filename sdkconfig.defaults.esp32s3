@@ -56,4 +56,14 @@ CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 # priority 8 (> NimBLE), so audio is not starved; board tasks (SELFTEST,
 # screenshot cmd) stay on Core 1. PSRAM handles the memory, so Core 0 is OK.
 CONFIG_BT_NIMBLE_PINNED_TO_CORE=0
+# === TLS/mbedTLS memory tuning (fix boot-time "发送失败") ===
+# Hardware AES DMA staging buffer is proportional to SSL record size.
+# 16384->8192 halves the internal MALLOC_CAP_DMA allocation needed during
+# boot TLS handshake (which previously failed with ~20KB fragmented free).
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
+# Fewer small allocations forced into internal RAM -> less DMA pool
+# fragmentation (512->256).
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256
+# Free peer certificate after handshake (saves ~1-2KB post-handshake).
+CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y
 

@@ -134,6 +134,7 @@ void BluetoothKeyboard::Init() {
 
 void BluetoothKeyboard::StartScan(uint32_t seconds) {
 #ifdef CONFIG_BT_NIMBLE_ENABLED
+    ESP_LOGI(TAG, "StartScan: has_pending_keyboard_=%d", has_pending_keyboard_ ? 1 : 0);
     struct ble_gap_disc_params disc_params = {};
     disc_params.filter_duplicates = 1;
     disc_params.passive = 0;
@@ -357,6 +358,9 @@ int BluetoothKeyboard::GapEventCallback(struct ble_gap_event* event, void* arg) 
         return 0;
     }
     case BLE_GAP_EVENT_DISC_COMPLETE: {
+        ESP_LOGI(TAG, "DISC_COMPLETE: pending=%d keyboard_found=%d",
+                 (ctx->self && ctx->self->has_pending_keyboard_) ? 1 : 0,
+                 ctx->keyboard_addr_found);
         // If we have a pending keyboard from a previous scan, connect it now
         // (second BTSCAN = explicit connect intent). Otherwise remember the
         // first keyboard found.
