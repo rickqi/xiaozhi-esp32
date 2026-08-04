@@ -13,9 +13,9 @@ namespace VersionInfo {
 
 static const char* kFeatures[] = {
     "语音交互：离线唤醒词、流式语音识别与语音合成，支持中文/英文/日文",
-    "双协议通信：WebSocket 与 MQTT+UDP 双协议，支持 WiFi 与 4G",
+    "通信：WebSocket 与 MQTT+UDP 双协议，支持 WiFi 连接",
     "OPUS 音频编解码与流式 ASR+LLM+TTS 对话",
-    "设备端 MCP 工具：音箱、屏幕、LED、温湿度、电量、录音、音乐、日志等语音可控",
+    "设备端 MCP 工具：音箱、屏幕、温湿度、电量、录音、音乐、日志等语音可控",
     "4.2 寸圆形单色 LCD 显示，支持表情动画与状态轮播",
     "音乐播放：支持 SD 卡 MP3/AAC/M4A 音乐，自动解码重采样，中文文件名",
     "SD 卡录音与回放，支持一键录音与语音回放",
@@ -66,7 +66,6 @@ std::string BuildVersionInfoJson() {
 
     json += R"(,"firmware_description":")" + GetVersionString() + R"(")";
     json += R"(,"git_commit":")" + std::string(GIT_COMMIT) + R"(")";
-    json += R"(,"git_commit_full":")" + std::string(GIT_COMMIT) + R"(")";
     json += R"(,"features":)" + GetFeatureListJson();
     json += R"(,"flash_note":")";
     json += "烧录请使用 idf.py -p COMx flash，分区为双 OTA 槽（ota_0/ota_1）+ assets 分区，";

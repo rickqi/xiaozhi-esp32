@@ -6,6 +6,31 @@
 
 ---
 
+## v3.2.4 — 2026-08-04
+
+### fix
+- **修复音乐播放无声**（"播放危险派对/任何歌曲都没声音"）：
+  - 根因：`PlayMusicByName()` 用 `xTaskCreatePinnedToCore` 动态创建 12KB 内部 RAM 任务栈；内部 RAM 被 BLE heap + TLS 缓冲 + 音频任务碎片化后分配失败（返回 -1），且**返回值未检查** → 函数静默返回 true（MCP 报 "Playing music"）但播放任务从未运行 → 无声无日志
+  - 修复：改为**常驻音乐播放任务**（`MusicTask()`，创建一次）+ **PSRAM 静态栈**（16KB，`heap_caps_malloc(MALLOC_CAP_SPIRAM)`）——不受内部 RAM 碎片影响；播放请求经二进制信号量传递，任务循环复用栈/TCB
+  - 顺带修复：任务创建失败现在会返回 false + 打印错误日志（MCP 报 "file not found" 而非虚假成功）
+- **BOOT 三击版本弹窗文本缓冲溢出警告**：`char info[512]` 不足以容纳扩充后的版本摘要（`-Werror=format-truncation` 报错），增至 640
+
+---
+
+## v3.2.3 — 2026-08-04
+
+### fix
+- **版本信息与实际功能一致性修正**（`self.get_version_info` 语音查询内容校准）：
+  - `kFeatures[]` 第 2 条移除错误的"4G"声明（本板 waveshare-s3-rlcd-4.2 仅 WiFi，无 ML307 模块）
+  - `kFeatures[]` 第 4 条移除错误的"LED"声明（本板无 LED，工具列表为音箱/屏幕/温湿度/电量/录音/音乐/日志）
+  - 移除冗余的 `git_commit_full` JSON 字段（与 `git_commit` 同值且无消费方，构建系统仅注入短 hash）
+- **BOOT 三击版本弹窗"近期版本更新"摘要滞后**：补充 v3.2.0（蓝牙键盘输入）、v3.1.0（环境自检·TLS 优化）条目，与实际功能一致
+
+### change
+- 板 README 变更记录表补充 v3.2.1/v3.2.2 条目（TLS 内存修复、DNS 就绪等待）
+
+---
+
 ## v3.2.2 — 2026-08-04
 
 ### fix

@@ -90,6 +90,14 @@ private:
     // Music playback state (MP3 from /sdcard/music)
     volatile bool music_playing_ = false;
     volatile bool music_stop_ = false;
+    // Resident music playback task (created once, PSRAM stack): avoids
+    // repeated xTaskCreate of a large internal-RAM stack which fails when
+    // internal RAM is fragmented (BLE heap + TLS buffers). The task waits on
+    // a semaphore; PlayMusicByName() copies the path then releases it.
+    TaskHandle_t music_task_ = nullptr;
+    SemaphoreHandle_t music_req_sem_ = nullptr;
+    static constexpr size_t kMusicTaskStackBytes = 16 * 1024;
+    char music_request_path_[300] = "";
     // ChatLog playback state (chatlog WAV from /sdcard/logs/chatlogs)
     volatile bool chatlog_playing_ = false;
     volatile bool chatlog_stop_ = false;
@@ -1761,7 +1769,24 @@ private:
         return true;
     }
 
-    // Play an MP3 by filename from /sdcard/music (spawns task, mirrors play_recording)
+    // Resident music playback task body: waits for a request semaphore, then
+    // plays the requested file. Created once with a PSRAM-backed stack (large
+    // internal-RAM stacks fail when internal RAM is fragmented by BLE heap +
+    // TLS buffers + audio tasks). Reuses the stack/TCB across songs.
+    // NOTE: PlayMusicPath() owns music_playing_/music_stop_ lifecycle.
+    void MusicTask() {
+        ESP_LOGI(TAG, "Music: resident playback task started");
+        while (true) {
+            if (music_req_sem_ == nullptr ||
+                xSemaphoreTake(music_req_sem_, portMAX_DELAY) != pdTRUE) {
+                continue;
+            }
+            PlayMusicPath(music_request_path_);
+        }
+    }
+
+    // Play an MP3 by filename from /sdcard/music (delegates to the resident
+    // playback task; returns immediately).
     bool PlayMusicByName(const char *filename) {
         if (music_playing_) {
             return false;  // already playing
@@ -1771,14 +1796,39 @@ private:
         snprintf(path, sizeof(path), "/sdcard/music/%.240s", filename);
         struct stat st;
         if (stat(path, &st) != 0) return false;
-        // Spawn task to play (don't block MCP callback)
-        static char music_path[300];
-        snprintf(music_path, sizeof(music_path), "%s", path);
-        xTaskCreatePinnedToCore([](void *arg) {
-            auto board = (CustomBoard *)arg;
-            board->PlayMusicPath(music_path);
-            vTaskDelete(NULL);
-        }, "mcp_music", 12 * 1024, this, 3, NULL, 1);
+
+        // Lazily create the resident playback task (once).
+        if (music_task_ == nullptr) {
+            music_req_sem_ = xSemaphoreCreateBinary();
+            if (music_req_sem_ == nullptr) {
+                ESP_LOGE(TAG, "Music: request semaphore creation failed");
+                return false;
+            }
+            // PSRAM-backed static stack: immune to internal-RAM fragmentation.
+            static StackType_t* music_stack =
+                (StackType_t*)heap_caps_malloc(kMusicTaskStackBytes, MALLOC_CAP_SPIRAM);
+            if (music_stack == nullptr) {
+                ESP_LOGE(TAG, "Music: PSRAM stack alloc failed");
+                return false;
+            }
+            static StaticTask_t music_tcb;
+            music_task_ = xTaskCreateStaticPinnedToCore(
+                [](void *arg) {
+                    auto board = (CustomBoard *)arg;
+                    board->MusicTask();
+                },
+                "mcp_music", kMusicTaskStackBytes / sizeof(StackType_t), this,
+                3, music_stack, &music_tcb, 1);
+            if (music_task_ == nullptr) {
+                ESP_LOGE(TAG, "Music: resident task creation failed");
+                return false;
+            }
+            ESP_LOGI(TAG, "Music: resident playback task created (PSRAM stack)");
+        }
+
+        // Hand the path to the resident task and wake it.
+        snprintf(music_request_path_, sizeof(music_request_path_), "%s", path);
+        xSemaphoreGive(music_req_sem_);
         return true;
     }
 
@@ -2439,18 +2489,19 @@ private:
 
         // Build version info text
         auto app_desc = esp_app_get_description();
-        char info[512];
+        char info[640];
         snprintf(info, sizeof(info),
             "小智 AI 固件 v%s\n"
             "构建: %s %s\n"
             "git: %s  ESP-IDF: %s\n"
             "\n"
             "近期版本更新:\n"
+            "v3.2.0 蓝牙键盘输入\n"
+            "v3.1.0 环境自检·TLS优化\n"
             "v3.0.0 分区扩大(OTA 4.6MB)\n"
             "v2.9.0 传感器历史·定时闹钟\n"
             "v2.8.0 WiFi热更新·OTA在线升级\n"
             "v2.7.0 mDNS·WAV播放·ChatLog查看\n"
-            "v2.5.0 HTTP文件服务器\n"
             "\n"
             "按键说明:\n"
             "BOOT: 单击=聊天 双击=录音\n"
