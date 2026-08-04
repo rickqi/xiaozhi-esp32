@@ -6,6 +6,16 @@
 
 ---
 
+## v3.3.0 — 2026-08-04
+
+### feat
+- **蓝牙设备日志独立记录**：BLE 键盘相关日志（扫描/连接/断开/按键/HID 报告）不再混入系统日志，单独写入 `/sdcard/logs/ble_YYYYMMDD.txt`
+  - 实现：`SdLogVprintf`（全局 ESP_LOG tee）按 `ble_keyboard` TAG 分流，额外追加到独立文件；懒加载打开（SD 未就绪时自动重试）；独立 fsync 节流（1s）
+  - 系统日志列表（串口 `SYSLOGLIST` 与 MCP `self.list_chatlogs(system_logs)`）同步识别 `ble_` 前缀文件
+  - HTTP 文件服务器 `/logs/` 目录已自动暴露独立蓝牙日志文件（可浏览/下载）
+
+---
+
 ## v3.2.4 — 2026-08-04
 
 ### fix

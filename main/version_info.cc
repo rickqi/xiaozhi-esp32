@@ -32,6 +32,7 @@ static const char* kFeatures[] = {
     "硬件自检：7 项（显示/按键/SD 卡/电池/RTC/温湿度/音频）",
     "本地截图：串口或按键触发，PBM 输出",
     "蓝牙键盘输入：BLE HID Host 连接键盘，快捷键控制（对话/音量/截图/录音等），串口 BTSCAN 配对",
+    "蓝牙日志独立记录：键盘扫描/连接/按键事件单独保存到 SD 卡（/sdcard/logs/ble_*.txt）",
 };
 
 std::string GetVersionString() {

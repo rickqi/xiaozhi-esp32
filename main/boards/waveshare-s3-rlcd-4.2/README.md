@@ -164,6 +164,7 @@ idf.py -p $env:XIAOZHI_PORT flash monitor
 
 | 版本/提交 | 内容 |
 |---|---|
+| v3.3.0 | **蓝牙设备日志独立记录**：`ble_keyboard` TAG 日志（扫描/连接/断开/按键/HID）单独写入 `/sdcard/logs/ble_YYYYMMDD.txt`，不再混入系统日志；`SYSLOGLIST` 与 `self.list_chatlogs(system_logs)` 同步列出；HTTP `/logs/` 可浏览下载 |
 | v3.2.2 | **修复启动期"检查新版本失败"红字**：OTA 检查前先短超时探测 DNS 就绪（消除 WiFi 刚关联时 getaddrinfo ~14s 超时导致的 `0x8001` 红字）；错误提示附带 `esp_err_to_name()` 可读错误名 |
 | v3.2.1 | **修复开机"发送失败"（TLS 内存）**：`SSL_IN_CONTENT_LEN` 16384→8192、`SPIRAM_MALLOC_ALWAYSINTERNAL` 512→256、`DYNAMIC_FREE_PEER_CERT=y`，消除启动期 esp-aes DMA 内存耗尽；BLE 键盘两段式连接（BTSCAN 二次才连接，防 NimBLE 内存泄漏） |
 | v3.2.0 | **新增蓝牙键盘输入（BLE HID Host）**：`BluetoothKeyboard` 类 + esp_hid（NimBLE）连接 BLE 键盘；快捷键控制（Enter=对话/Esc=停止/Space=监听/↑↓=音量/R=截图/T=录音/M=静音/V=版本/Tab=提示音 + 数字键快捷功能）；串口 `BTSCAN` 配对；修复自动扫描连接不可达键盘导致的内存泄漏 |

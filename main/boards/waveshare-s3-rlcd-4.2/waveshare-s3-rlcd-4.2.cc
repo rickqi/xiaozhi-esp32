@@ -527,6 +527,30 @@ private:
         }
     }
 
+    // Lazily open the independent BLE keyboard log file. Returns true when
+    // ready to append. Called from SdLogVprintf (may run before SD mount or
+    // before time sync, so we retry on each ble_keyboard log line until OK).
+    bool OpenBleLogFile() {
+        if (ble_log_file_ != nullptr) return true;
+        if (!sdcard_mounted_) return false;
+        time_t now = time(NULL);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        if (tm.tm_year < 100) {
+            snprintf(ble_log_path_, sizeof(ble_log_path_), "/sdcard/logs/ble_00000000.txt");
+        } else {
+            snprintf(ble_log_path_, sizeof(ble_log_path_), "/sdcard/logs/ble_%04d%02d%02d.txt",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+        }
+        ble_log_file_ = fopen(ble_log_path_, "a");
+        if (ble_log_file_) {
+            printf("[SdLog] BLE log file: %s\n", ble_log_path_);
+        } else {
+            return false;
+        }
+        return true;
+    }
+
     // Custom vprintf: write to original console AND log file on SD card
     static int SdLogVprintf(const char *fmt, va_list args) {
         auto board = GetSdLogBoard();
@@ -571,6 +595,22 @@ private:
                 }
             }
         }
+        // Independent BLE keyboard log: additionally append ble_keyboard TAG
+        // lines to /sdcard/logs/ble_YYYYMMDD.txt (same mutex protects both
+        // files since this runs on any task).
+        if (strstr(buf, "ble_keyboard") != nullptr) {
+            board->log_mutex_.lock();
+            if (board->OpenBleLogFile()) {
+                size_t wr = fwrite(buf, 1, len, board->ble_log_file_);
+                fflush(board->ble_log_file_);
+                int64_t now_ms = esp_timer_get_time() / 1000;
+                if (now_ms - board->ble_log_last_fsync_ms_ >= 1000) {
+                    fsync(fileno(board->ble_log_file_));
+                    board->ble_log_last_fsync_ms_ = now_ms;
+                }
+            }
+            board->log_mutex_.unlock();
+        }
         return len;
     }
 
@@ -579,6 +619,13 @@ private:
     static CustomBoard* sd_log_board_;  // defined outside class
     vprintf_like_t orig_vprintf_ = nullptr;
     std::mutex log_mutex_;
+    // Independent BLE keyboard log file (/sdcard/logs/ble_YYYYMMDD.txt):
+    // ble_keyboard TAG lines are additionally appended here so keyboard
+    // scan/connect/key events can be reviewed without wading through the
+    // system log. Opened lazily on first use (SD may not be ready at boot).
+    FILE *ble_log_file_ = nullptr;
+    char ble_log_path_[64] = "";
+    int64_t ble_log_last_fsync_ms_ = 0;
 
     void InitializeSdLog() {
         sd_log_board_ = this;
@@ -1089,7 +1136,11 @@ private:
         struct dirent *ent;
         printf("SYSLOGS_START\n");
         while ((ent = readdir(dir)) != NULL) {
-            if (strncmp(ent->d_name, "log_", 4) == 0 && strstr(ent->d_name, ".txt")) {
+            // System log (log_YYYYMMDD.txt) and independent BLE log
+            // (ble_YYYYMMDD.txt) both live under /sdcard/logs.
+            bool is_syslog = (strncmp(ent->d_name, "log_", 4) == 0);
+            bool is_blelog = (strncmp(ent->d_name, "ble_", 4) == 0);
+            if ((is_syslog || is_blelog) && strstr(ent->d_name, ".txt")) {
                 char path[300];
                 snprintf(path, sizeof(path), "/sdcard/logs/%.*s",
                          (int)(sizeof(path) - 14), ent->d_name);
@@ -1127,7 +1178,11 @@ private:
         int count = 0;
         struct dirent *ent;
         while ((ent = readdir(dir)) != NULL && count < 40) {
-            if (strncmp(ent->d_name, "log_", 4) == 0 && strstr(ent->d_name, ".txt")) {
+            // System log (log_YYYYMMDD.txt) and independent BLE log
+            // (ble_YYYYMMDD.txt) both live under /sdcard/logs.
+            bool is_syslog = (strncmp(ent->d_name, "log_", 4) == 0);
+            bool is_blelog = (strncmp(ent->d_name, "ble_", 4) == 0);
+            if ((is_syslog || is_blelog) && strstr(ent->d_name, ".txt")) {
                 char path[300];
                 snprintf(path, sizeof(path), "/sdcard/logs/%.*s",
                          (int)(sizeof(path) - 14), ent->d_name);
