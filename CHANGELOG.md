@@ -6,6 +6,17 @@
 
 ---
 
+## v3.2.2 — 2026-08-04
+
+### fix
+- **消除启动期"检查新版本失败"红字提示**：WiFi 刚关联时 DHCP/DNS 尚未就绪，`CheckVersion()` 内的 `getaddrinfo()` 会阻塞 ~14s 后返回 `0x8001`（`ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME`），导致每次开机都弹红色错误横幅
+  - `CheckNewVersion()` 在发起 OTA 检查前先用短超时探测 OTA 域名 DNS（最多 6 次 × 2s），解析成功后才调用 `CheckVersion()`；DNS 始终不可达则静默放弃（不打搅用户）
+
+### change
+- **错误提示可读性**：OTA 检查失败提示由裸数字 `code=32769` 改为 `code=32769 (ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME)`，便于定位问题
+
+---
+
 ## v3.2.1 — 2026-08-04
 
 ### fix

@@ -15,6 +15,7 @@
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <font_awesome.h>
 
 #define TAG "Application"
@@ -418,6 +419,37 @@ void Application::CheckNewVersion() {
         auto display = board.GetDisplay();
         display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
 
+        // Wait until the OTA server hostname can be resolved. DNS is not
+        // guaranteed to be ready right after WiFi association, and a failed
+        // getaddrinfo() inside CheckVersion() blocks the TLS connection for
+        // ~14s (DNS timeout) before erroring out with code=0x8001
+        // (ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME). Probing DNS first with a
+        // short timeout avoids the red alert flashing at every boot.
+        std::string url = ota_->GetCheckVersionUrl();
+        std::string host = url.substr(url.find("://") + 3);
+        host = host.substr(0, host.find('/'));
+        int dns_retry = 0;
+        const int MAX_DNS_RETRY = 6;
+        while (dns_retry < MAX_DNS_RETRY) {
+            struct addrinfo hints = {};
+            hints.ai_family = AF_UNSPEC;
+            hints.ai_socktype = SOCK_STREAM;
+            struct addrinfo* res = nullptr;
+            int gai_ret = getaddrinfo(host.c_str(), nullptr, &hints, &res);
+            if (gai_ret == 0) {
+                freeaddrinfo(res);
+                break;  // DNS resolved
+            }
+            dns_retry++;
+            ESP_LOGW(TAG, "DNS not ready for %s (gai=%d), retry %d/%d",
+                     host.c_str(), gai_ret, dns_retry, MAX_DNS_RETRY);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+        if (dns_retry >= MAX_DNS_RETRY) {
+            ESP_LOGE(TAG, "DNS resolution failed for %s, giving up version check", host.c_str());
+            return;
+        }
+
         esp_err_t err = ota_->CheckVersion();
         if (err != ESP_OK) {
             retry_count++;
@@ -427,7 +459,8 @@ void Application::CheckNewVersion() {
             }
 
             char error_message[128];
-            snprintf(error_message, sizeof(error_message), "code=%d, url=%s", err, ota_->GetCheckVersionUrl().c_str());
+            snprintf(error_message, sizeof(error_message), "code=%d (%s), url=%s", err,
+                     esp_err_to_name(err), ota_->GetCheckVersionUrl().c_str());
             char buffer[256];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, error_message);
             Alert(Lang::Strings::ERROR, buffer, "cloud_slash", Lang::Sounds::OGG_EXCLAMATION);
