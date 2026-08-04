@@ -6,6 +6,20 @@
 
 ---
 
+## v3.3.1 — 2026-08-04
+
+### feat
+- **BTSCAN 扫描显示完整 BLE 设备信息**：除原有 MAC/名称/RSSI/appearance 外，新增
+  - 地址类型（public/random/rpa-pub/rpa-rnd）— 判断设备是否使用随机地址（隐私保护）
+  - 事件类型（ADV_IND/SCAN_RSP/NONCONN_IND 等）— 区分初始广播包与扫描响应，解释设备名为何常为空
+  - 名称完整性标记（complete/incomplete）
+  - 服务 UUID16/32/128 全打印（含 HID 0x1812 识别）
+  - TX 功率（dBm）
+  - 广播间隔（ms）
+  - **厂商数据**（mfg data）：company ID + 完整 hex 载荷（如 company=0x004c = Apple），便于识别设备厂商/型号
+
+---
+
 ## v3.3.0 — 2026-08-04
 
 ### feat

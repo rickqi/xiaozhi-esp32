@@ -323,29 +323,89 @@ int BluetoothKeyboard::GapEventCallback(struct ble_gap_event* event, void* arg) 
 
         // Extract device description from advertisement/scan-response data.
         char name[64] = "?";
+        bool name_complete = false;
         if (fields.name != nullptr) {
             size_t n = fields.name_len < sizeof(name) - 1 ? fields.name_len : sizeof(name) - 1;
             memcpy(name, fields.name, n);
             name[n] = '\0';
+            name_complete = fields.name_is_complete;
         }
         uint16_t appearance = fields.appearance_is_present ? fields.appearance : 0;
         bool is_keyboard = (appearance == ESP_HID_APPEARANCE_KEYBOARD);
 
+        const char* addr_type_str = "?";
+        switch (event->disc.addr.type) {
+            case 0x00: addr_type_str = "public"; break;    // BLE_ADDR_TYPE_PUBLIC
+            case 0x01: addr_type_str = "random"; break;    // BLE_ADDR_TYPE_RANDOM
+            case 0x02: addr_type_str = "rpa-pub"; break;   // BLE_ADDR_TYPE_RPA_PUB_DEFAULT
+            case 0x03: addr_type_str = "rpa-rnd"; break;   // BLE_ADDR_TYPE_RPA_RND_DEFAULT
+            default: break;
+        }
+
+        // Event type tells us if this PDU is the initial advertisement or the
+        // scan response (the latter usually carries the name/appearance).
+        // BLE_HCI_ADV_RPT_EVTYPE_*: 0=ADV_IND 1=DIR_IND 2=SCAN_IND
+        // 3=NONCONN_IND 4=SCAN_RSP
+        const char* evt_str = "?";
+        switch (event->disc.event_type) {
+            case 0: evt_str = "ADV_IND"; break;
+            case 1: evt_str = "DIR_IND"; break;
+            case 2: evt_str = "SCAN_IND"; break;
+            case 3: evt_str = "NONCONN_IND"; break;
+            case 4: evt_str = "SCAN_RSP"; break;
+            default: break;
+        }
+
         ESP_LOGI(TAG,
-                 "BLE device: %02x:%02x:%02x:%02x:%02x:%02x  name='%s'  RSSI=%d  appearance=0x%04x%s",
+                 "BLE device: %02x:%02x:%02x:%02x:%02x:%02x  name='%s'%s  addr=%s  type=%s  RSSI=%d  appearance=0x%04x%s",
                  event->disc.addr.val[0], event->disc.addr.val[1],
                  event->disc.addr.val[2], event->disc.addr.val[3],
                  event->disc.addr.val[4], event->disc.addr.val[5],
-                 name, event->disc.rssi, appearance,
+                 name, name_complete ? "" : " (incomplete)", addr_type_str, evt_str,
+                 event->disc.rssi, appearance,
                  is_keyboard ? "  [KEYBOARD]" : "");
 
-        // Also print advertised service UUIDs if present (e.g. HID 0x1812).
+        // Print advertised service UUIDs (16/32/128-bit) if present.
         for (int i = 0; i < fields.num_uuids16; i++) {
             uint16_t u = ble_uuid_u16(&fields.uuids16[i].u);
             if (u == 0x1812) {
-                ESP_LOGI(TAG, "  -> advertises HID service (0x1812)");
+                ESP_LOGI(TAG, "  -> HID service (0x1812)");
             } else {
                 ESP_LOGI(TAG, "  -> service UUID16: 0x%04x", u);
+            }
+        }
+        for (int i = 0; i < fields.num_uuids32; i++) {
+            ESP_LOGI(TAG, "  -> service UUID32: 0x%08lx",
+                     (unsigned long)fields.uuids32[i].value);
+        }
+        for (int i = 0; i < fields.num_uuids128; i++) {
+            const ble_uuid128_t* u = &fields.uuids128[i];
+            ESP_LOGI(TAG, "  -> service UUID128: %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                     u->value[15], u->value[14], u->value[13], u->value[12],
+                     u->value[11], u->value[10], u->value[9], u->value[8],
+                     u->value[7], u->value[6], u->value[5], u->value[4],
+                     u->value[3], u->value[2], u->value[1], u->value[0]);
+        }
+        if (fields.tx_pwr_lvl_is_present) {
+            ESP_LOGI(TAG, "  -> TX power: %d dBm", fields.tx_pwr_lvl);
+        }
+        if (fields.adv_itvl_is_present) {
+            ESP_LOGI(TAG, "  -> adv interval: %u ms", fields.adv_itvl);
+        }
+        if (fields.mfg_data != nullptr && fields.mfg_data_len > 0) {
+            // Manufacturer data: first 2 bytes = company ID (little-endian),
+            // rest is vendor payload.
+            char hex[160];
+            int pos = 0;
+            for (int i = 0; i < fields.mfg_data_len && pos < (int)sizeof(hex) - 3; i++) {
+                pos += snprintf(hex + pos, sizeof(hex) - pos, "%02x ", fields.mfg_data[i]);
+            }
+            if (fields.mfg_data_len >= 2) {
+                uint16_t company = fields.mfg_data[0] | (fields.mfg_data[1] << 8);
+                ESP_LOGI(TAG, "  -> mfg data: company=0x%04x len=%d [%s]", company,
+                         fields.mfg_data_len, hex);
+            } else {
+                ESP_LOGI(TAG, "  -> mfg data: len=%d [%s]", fields.mfg_data_len, hex);
             }
         }
 
