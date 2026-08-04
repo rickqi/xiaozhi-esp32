@@ -6,6 +6,18 @@
 
 ---
 
+## v3.3.3 — 2026-08-04
+
+### fix
+- **修复蓝牙键盘第二次连接崩溃（ESP_ERR_NO_MEM 0x101）**：首次连接部分成功后 NimBLE 连接上下文因 `ble_gap_terminate` 使用无效句柄（0xFFFF）泄漏 → `MAX_CONNECTIONS=1` 时第二次连接无空槽 → 崩溃
+  - `ConnectTask` 改用 `ble_gap_conn_find_by_addr()` 查找真实句柄再 terminate
+  - 连接前内存预检（内部 RAM <15KB 时优雅中止，不再崩溃）
+  - `CONFIG_BT_NIMBLE_MAX_CONNECTIONS` 1→2（单条泄漏连接不再阻塞后续连接）
+- **修复 Disconnect() 双释放**：显式断开路径 `esp_hidh_dev_close` + 立即 free + 异步 CLOSE_EVENT 再次 free（堆损坏）——CLOSE_EVENT 仅在 `dev_` 仍匹配时 free
+- **修复 ConnectAsync 任务创建泄漏**：`xTaskCreate` 返回值未检查，失败时泄漏 `addr`/`args`——现在失败即释放并打印错误
+
+---
+
 ## v3.3.2 — 2026-08-04
 
 ### feat
