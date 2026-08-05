@@ -133,6 +133,7 @@ idf.py -p $env:XIAOZHI_PORT flash
 | `self.delete_music` | `filename` | 删除指定 MP3 音乐 |
 | `self.disp.network` | — | 重新配网 |
 | `self.scan_ble` | — | 扫描并连接 BLE 键盘（两段式：第 1 次扫描记住设备并播报名称，第 2 次连接；先让键盘进入配对模式） |
+| `self.get_ble_keyboard_status` | — | 查询蓝牙键盘连接状态（已连接/未连接/扫描中，含键盘名） |
 | `self.get_ble_keyboard_shortcuts` | — | 播报蓝牙键盘快捷键说明（Enter/Esc/Space/方向键/R/T/M/V/Tab/数字键 1-9） |
 
 **对话示例**：
@@ -148,6 +149,7 @@ idf.py -p $env:XIAOZHI_PORT flash
 - "那次对话说了什么？" → `self.get_chatlog_summary("chat_..._天气查询.txt")`
 - "听一下那段对话录音" → `self.play_chatlog_audio("chat_..._天气查询.wav")`
 - "扫描蓝牙键盘" / "连接蓝牙键盘" → `self.scan_ble`（说两次：先扫描后连接）
+- "键盘连上了吗？" / "查询键盘状态" → `self.get_ble_keyboard_status`
 - "键盘有哪些快捷键？" → `self.get_ble_keyboard_shortcuts`
 - "只听小智的声音" → `self.play_chatlog_audio(..., channel="ai")`
 - "删掉那条对话" → `self.delete_chatlog("chat_...txt")`

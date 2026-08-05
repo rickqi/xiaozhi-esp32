@@ -2158,6 +2158,37 @@ private:
 #endif
             });
 
+        // BLE keyboard connection status (voice queryable) — closes the
+        // scan_ble loop: after scan/connect, ask this to confirm.
+        mcp_server.AddTool("self.get_ble_keyboard_status",
+            "Query the Bluetooth keyboard connection status: connected or not, "
+            "and the connected keyboard name if any.\n"
+            "Use this when the user asks about keyboard status, whether the "
+            "keyboard is connected, or to confirm the result after scanning "
+            "(e.g. \"键盘连上了吗\", \"查询键盘状态\", \"蓝牙键盘连接了吗\").",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+#if CONFIG_USE_BLE_HID_KEYBOARD
+                if (bt_keyboard_.IsConnected()) {
+                    std::string name = bt_keyboard_.ConnectedName();
+                    return std::string("蓝牙键盘已连接：") +
+                           (name.empty() ? std::string("未知设备") : name) + "。";
+                }
+                if (bt_keyboard_.IsScanning()) {
+                    return std::string("蓝牙键盘正在扫描中，请稍后再问。");
+                }
+                if (bt_keyboard_.HasPendingKeyboard()) {
+                    std::string name = bt_keyboard_.LastScanName();
+                    return std::string("蓝牙键盘未连接，已找到待连接的键盘：") +
+                           (name.empty() ? std::string("未知设备") : name) +
+                           "。请说“扫描蓝牙键盘”进行连接。";
+                }
+                return std::string("蓝牙键盘未连接。请将键盘进入配对模式，然后说“扫描蓝牙键盘”。");
+#else
+                return std::string("BLE keyboard support is not enabled in this build");
+#endif
+            });
+
         // BLE keyboard hotkey reference (voice queryable)
         mcp_server.AddTool("self.get_ble_keyboard_shortcuts",
             "List all Bluetooth keyboard shortcut keys and their actions supported by this device.\n"
