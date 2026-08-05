@@ -132,6 +132,8 @@ idf.py -p $env:XIAOZHI_PORT flash
 | `self.stop_music` | — | 停止当前音乐播放 |
 | `self.delete_music` | `filename` | 删除指定 MP3 音乐 |
 | `self.disp.network` | — | 重新配网 |
+| `self.scan_ble` | — | 扫描并连接 BLE 键盘（两段式：第 1 次扫描记住设备并播报名称，第 2 次连接；先让键盘进入配对模式） |
+| `self.get_ble_keyboard_shortcuts` | — | 播报蓝牙键盘快捷键说明（Enter/Esc/Space/方向键/R/T/M/V/Tab/数字键 1-9） |
 
 **对话示例**：
 - "现在室温多少度？" → `self.get_temperature_humidity`
@@ -145,6 +147,8 @@ idf.py -p $env:XIAOZHI_PORT flash
 - "系统日志" / "logs 目录的文件" → `self.list_chatlogs(directory="system_logs")`
 - "那次对话说了什么？" → `self.get_chatlog_summary("chat_..._天气查询.txt")`
 - "听一下那段对话录音" → `self.play_chatlog_audio("chat_..._天气查询.wav")`
+- "扫描蓝牙键盘" / "连接蓝牙键盘" → `self.scan_ble`（说两次：先扫描后连接）
+- "键盘有哪些快捷键？" → `self.get_ble_keyboard_shortcuts`
 - "只听小智的声音" → `self.play_chatlog_audio(..., channel="ai")`
 - "删掉那条对话" → `self.delete_chatlog("chat_...txt")`
 - "下载日志" / "导出文件" → `self.start_file_server`（返回 URL，浏览器打开即可下载）
@@ -158,9 +162,10 @@ idf.py -p $env:XIAOZHI_PORT flash
 ### 5.1 配对键盘
 
 1. 让键盘进入**配对模式**（BLE 键盘常见方式：长按 Connect 键 / `Fn+C` / `Fn+1`，指示灯快速闪烁）
-2. 向串口发送 `BTSCAN`（115200 波特率，回车结束）
-3. 设备扫描周围 BLE 键盘（约 10 秒），自动连接第一个发现的键盘
+2. **串口方式**：发送 `BTSCAN` → 再发一次 `BTSCAN`（两段式：第 1 次扫描记住键盘地址，第 2 次连接）
+3. **语音方式**：对设备说"扫描蓝牙键盘" → 播报找到的键盘名称后再问一次"扫描蓝牙键盘"即连接
 4. 连接成功后屏幕显示"键盘已连接"（Just Works 配对，无需输入密码）
+5. 随时可用 `BTSTATUS` 串口命令查询连接状态（`BTSTATUS: CONNECTED` / `DISCONNECTED`）
 
 > ⚠️ **注意**：配对前务必先让键盘进入配对模式。若键盘未配对，连接会挂起 30 秒超时（期间占用部分内存，超时后自动释放）。
 
@@ -187,8 +192,11 @@ idf.py -p $env:XIAOZHI_PORT flash
 | 8 | 触发唤醒词 |
 | 9 | 重启设备 |
 
-### 5.3 断开
+> 💬 **语音查询快捷键**：问"键盘有哪些快捷键"即可播报上表。
 
+### 5.3 自动重连与断开
+
+- **自动重连**：连接成功过的键盘地址保存在 NVS，设备重启后约 8 秒**自动定向重连**（仅连接已知地址，不扫描，安全无泄漏）；键盘不在线则自动跳过，可随时手动 `BTSCAN`
 - 键盘关闭或远离后自动断开，屏幕显示"键盘已断开"
 - 重新连接需再次让键盘进入配对模式 + `BTSCAN`
 

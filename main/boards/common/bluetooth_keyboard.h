@@ -45,6 +45,36 @@ public:
     /// Whether a BLE scan is currently in progress.
     bool IsScanning() const { return scanning_; }
 
+    /// Whether a keyboard address from a previous scan is saved and awaiting
+    /// the next BTSCAN / self.scan_ble call to connect (phase 1 of two-phase).
+    bool HasPendingKeyboard() const { return has_pending_keyboard_; }
+
+    /// Name of the keyboard found by the most recent scan ("" if none).
+    const std::string& LastScanName() const { return last_scan_name_; }
+
+    /// Name of the currently connected keyboard ("" if not connected).
+    const std::string& ConnectedName() const { return connected_name_; }
+
+    /// Whether a previously connected keyboard address is persisted in NVS
+    /// (auto-reconnect candidate at boot).
+    bool HasSavedKeyboard() const { return has_saved_keyboard_; }
+
+    /// Block until the current scan completes (DISC_COMPLETE) or timeout.
+    /// @return true if a keyboard was found during that scan.
+    bool WaitScanComplete(uint32_t timeout_ms);
+
+    /// Persist the last successfully connected keyboard to NVS so it can be
+    /// reconnected automatically after a reboot.
+    void SaveLastKeyboardToNvs();
+
+    /// Load the persisted keyboard address from NVS (boot auto-reconnect).
+    void LoadLastKeyboardFromNvs();
+
+    /// Direct-connect to the saved keyboard (boot auto-reconnect). Safe by
+    /// design: connects ONLY to the known address — never triggers a scan,
+    /// so it cannot leak NimBLE connection memory on unreachable devices.
+    void AutoReconnect();
+
     // --- Callbacks (all invoked on the caller's task; see Note below) ---
     void OnKeyPress(KeyCallback callback) { on_key_press_ = std::move(callback); }
     void OnConnect(Callback callback) { on_connect_ = std::move(callback); }
@@ -107,6 +137,22 @@ private:
     uint8_t pending_keyboard_addr_[6] = {};
     uint8_t pending_keyboard_addr_type_ = 0;
     bool has_pending_keyboard_ = false;
+
+    // Names captured for voice/status reporting (v3.5.0).
+    std::string last_scan_name_;     // keyboard found by most recent scan
+    std::string connected_name_;     // currently connected keyboard
+
+    // Last successfully connected keyboard, persisted to NVS for auto
+    // reconnect at boot (safe: direct connect only, no blind scanning).
+    uint8_t saved_keyboard_addr_[6] = {};
+    uint8_t saved_keyboard_addr_type_ = 0;
+    std::string saved_keyboard_name_;
+    bool has_saved_keyboard_ = false;
+
+    // Scan completion signalling for the blocking WaitScanComplete() used by
+    // the self.scan_ble MCP tool (scan runs async on the NimBLE host task).
+    SemaphoreHandle_t scan_complete_sem_ = nullptr;
+    volatile bool scan_found_ = false;
 
     KeyCallback on_key_press_;
     Callback on_connect_;

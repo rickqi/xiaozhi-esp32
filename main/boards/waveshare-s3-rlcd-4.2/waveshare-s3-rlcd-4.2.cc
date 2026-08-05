@@ -1,5 +1,6 @@
 #include <esp_lcd_panel_vendor.h>
 #include <esp_app_desc.h>
+#include <esp_timer.h>
 #include <lvgl.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
@@ -334,6 +335,26 @@ private:
         // are not in pairing mode leaks NimBLE connection memory on each failed
         // attempt (free heap dropped 117KB -> 11KB, breaking OTA version check
         // and HTTP server). Scan is triggered manually via serial `BTSCAN`.
+        //
+        // Auto-reconnect (v3.5.0): if a keyboard was successfully connected
+        // before, its address is persisted in NVS; after boot we do a DIRECT
+        // connect to that known address only (never a scan), delayed so the
+        // NimBLE host has time to sync. Unreachable keyboards simply fail the
+        // one attempt — no scan, no memory leak.
+        if (bt_keyboard_.HasSavedKeyboard()) {
+            esp_timer_handle_t reconn_timer = nullptr;
+            esp_timer_create_args_t reconn_args = {};
+            reconn_args.callback = [](void* arg) {
+                auto* board = static_cast<CustomBoard*>(arg);
+                ESP_LOGI(TAG, "BLE keyboard auto-reconnect attempt");
+                board->bt_keyboard_.AutoReconnect();
+            };
+            reconn_args.arg = this;
+            reconn_args.name = "kbd_reconn";
+            if (esp_timer_create(&reconn_args, &reconn_timer) == ESP_OK) {
+                esp_timer_start_once(reconn_timer, 8 * 1000 * 1000);  // 8s after boot
+            }
+        }
 #endif
     }
 
@@ -2090,26 +2111,84 @@ private:
             });
 
         // Scan for BLE devices (e.g. bluetooth keyboard) — voice trigger
-        // for the serial BTSCAN command. Shows the spinning BLE icon while
-        // scanning; the icon becomes the solid bluetooth glyph on connect.
+        // for the serial BTSCAN command. Two-phase: 1st call scans and
+        // remembers the keyboard; 2nd call connects to it. Blocks until the
+        // 10s scan completes and reports the discovered device name.
         mcp_server.AddTool("self.scan_ble",
             "Scan for nearby Bluetooth Low Energy (BLE) devices, typically to "
             "find and connect a bluetooth keyboard.\n"
             "Put the keyboard into pairing mode first, then call this tool. "
             "After the scan, if a keyboard is found, call this tool a second "
             "time to connect to it.\n"
-            "Returns a status message about the scan.\n"
+            "Returns a status message with the discovered keyboard name.\n"
             "Use this when the user asks to scan for bluetooth, scan BLE, "
             "pair a keyboard, or connect a bluetooth keyboard.",
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
 #if CONFIG_USE_BLE_HID_KEYBOARD
+                // Already connected -> report and stop.
+                if (bt_keyboard_.IsConnected()) {
+                    std::string name = bt_keyboard_.ConnectedName();
+                    return std::string("蓝牙键盘已连接：") +
+                           (name.empty() ? std::string("未知设备") : name) +
+                           "。无需再次扫描。";
+                }
+                bool was_pending = bt_keyboard_.HasPendingKeyboard();
                 KeyboardScanNow();
-                return std::string("BLE scan started. If you want to connect a keyboard, "
-                                   "make sure it is in pairing mode, then ask me to scan again.");
+                // Block until the 10s scan completes (or timeout) so we can
+                // report the discovered device name to the user.
+                bool found = bt_keyboard_.WaitScanComplete(13000);
+                std::string name = bt_keyboard_.LastScanName();
+                if (name.empty()) {
+                    name = "未知设备";
+                }
+                if (was_pending) {
+                    // This call was the connect attempt; DISC_COMPLETE kicked
+                    // off ConnectAsync on the dedicated task.
+                    if (bt_keyboard_.IsConnected()) {
+                        return std::string("蓝牙键盘已连接：") + name + "。";
+                    }
+                    return std::string("正在连接键盘：") + name +
+                           "。请稍后告诉我“查询键盘状态”确认连接结果。";
+                }
+                if (found || bt_keyboard_.HasPendingKeyboard()) {
+                    return std::string("扫描完成，找到键盘：") + name +
+                           "。请再说一次“扫描蓝牙”来连接它。";
+                }
+                return std::string("扫描完成，未发现蓝牙键盘。请确认键盘已进入配对模式，然后重试。");
 #else
                 return std::string("BLE keyboard support is not enabled in this build");
 #endif
+            });
+
+        // BLE keyboard hotkey reference (voice queryable)
+        mcp_server.AddTool("self.get_ble_keyboard_shortcuts",
+            "List all Bluetooth keyboard shortcut keys and their actions supported by this device.\n"
+            "Use this tool when the user asks about keyboard shortcuts, hotkeys, or what keys do "
+            "(e.g. \"键盘有哪些快捷键\", \"按键功能\", \"快捷键是什么\").",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                return std::string(
+                    "本设备支持以下蓝牙键盘快捷键："
+                    "回车键：切换对话状态，开始或停止对话。"
+                    "Esc 键：停止倾听。"
+                    "空格键：开始倾听。"
+                    "上箭头：音量加十。"
+                    "下箭头：音量减十。"
+                    "R 键：截屏，截图输出到串口。"
+                    "T 键：切换录音，录到 SD 卡。"
+                    "M 键：麦克风静音切换。"
+                    "V 键：显示固件版本弹窗。"
+                    "Tab 键：播放提示音。"
+                    "数字键 1：播放提示音。"
+                    "数字键 2：重新配网。"
+                    "数字键 3：显示系统信息。"
+                    "数字键 4：播放 SD 卡音频。"
+                    "数字键 5：电量检查。"
+                    "数字键 6：切换 HTTP 文件服务器开关。"
+                    "数字键 7：停止 HTTP 文件服务器。"
+                    "数字键 8：唤醒词触发，说你好小智。"
+                    "数字键 9：重启设备。");
             });
 
         // Run hardware self-test (display, buttons, SD, battery, RTC, SHTC3, audio)

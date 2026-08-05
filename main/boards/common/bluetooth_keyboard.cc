@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_nimble_hci.h"
+#include "nvs_flash.h"
 #include "host/ble_gap.h"
 #include "host/ble_hs.h"
 #include "nimble/nimble_port.h"
@@ -147,6 +148,12 @@ void BluetoothKeyboard::Init() {
         ESP_LOGE(TAG, "NimBLE host init failed");
         return;
     }
+    // Scan-completion signalling for the blocking self.scan_ble MCP tool.
+    if (scan_complete_sem_ == nullptr) {
+        scan_complete_sem_ = xSemaphoreCreateBinary();
+    }
+    // Load last-connected keyboard address for boot auto-reconnect.
+    LoadLastKeyboardFromNvs();
     ESP_LOGI(TAG, "BLE HID host ready");
 }
 
@@ -159,6 +166,13 @@ void BluetoothKeyboard::StartScan(uint32_t seconds) {
     disc_params.itvl = 0x50;
     disc_params.window = 0x30;
     disc_params.filter_policy = 0;
+
+    // Reset per-scan signalling: clear any stale completion from a previous
+    // scan and the result flag (DISC_COMPLETE re-arms both).
+    scan_found_ = false;
+    if (scan_complete_sem_ != nullptr) {
+        xSemaphoreTake(scan_complete_sem_, 0);
+    }
 
     // Store scan context on heap; freed in gap callback when complete.
     auto* ctx = new BleScanCtx{this, seconds};
@@ -175,6 +189,16 @@ void BluetoothKeyboard::StartScan(uint32_t seconds) {
 #endif
 }
 
+bool BluetoothKeyboard::WaitScanComplete(uint32_t timeout_ms) {
+    if (scan_complete_sem_ == nullptr) {
+        return false;
+    }
+    if (xSemaphoreTake(scan_complete_sem_, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+        return scan_found_;
+    }
+    return false;  // timed out; scan still running or never started
+}
+
 void BluetoothKeyboard::Connect(const uint8_t* bda, uint8_t addr_type) {
     if (dev_) {
         ESP_LOGW(TAG, "Already connected; disconnect first");
@@ -187,6 +211,12 @@ void BluetoothKeyboard::Connect(const uint8_t* bda, uint8_t addr_type) {
         (uint8_t*)bda, ESP_HID_TRANSPORT_BLE, addr_type);
     if (dev) {
         dev_ = dev;
+        // NOTE: NVS persistence happens in the OPEN_EVENT handler (it reads
+        // the address directly from the dev handle, avoiding a race where
+        // the event task could run before this task finishes filling the
+        // saved_* members). Only the display name is captured here.
+        const char* nm = esp_hidh_dev_name_get(dev);
+        connected_name_ = nm ? nm : "";
         ESP_LOGI(TAG, "HID device opened: %s", esp_hidh_dev_name_get(dev));
     } else {
         ESP_LOGE(TAG, "esp_hidh_dev_open returned NULL");
@@ -215,6 +245,7 @@ void BluetoothKeyboard::Disconnect() {
         // dev_ here the event handler will skip its free — no double-free.
         esp_hidh_dev_free(dev_);
         dev_ = nullptr;
+        connected_name_.clear();
         if (on_disconnect_) {
             on_disconnect_();
         }
@@ -240,6 +271,18 @@ void BluetoothKeyboard::EventHandler(void* handler_args, esp_event_base_t base,
         if (param->open.status == ESP_OK) {
             ESP_LOGI(TAG, "OPEN: %s", esp_hidh_dev_name_get(dev));
             self->dev_ = dev;
+            const char* nm = esp_hidh_dev_name_get(dev);
+            self->connected_name_ = nm ? nm : "";
+            // Persist this keyboard for boot auto-reconnect. Read the BDA
+            // directly from the dev handle (race-free) — the pending addr
+            // type from the scan phase is stable by now.
+            const uint8_t* bda = esp_hidh_dev_bda_get(dev);
+            if (bda != nullptr) {
+                memcpy(self->saved_keyboard_addr_, bda, 6);
+            }
+            self->saved_keyboard_addr_type_ = self->pending_keyboard_addr_type_;
+            self->saved_keyboard_name_ = self->connected_name_;
+            self->SaveLastKeyboardToNvs();
             if (self->on_connect_) {
                 self->on_connect_();
             }
@@ -261,6 +304,7 @@ void BluetoothKeyboard::EventHandler(void* handler_args, esp_event_base_t base,
             // Normal (remote/async) disconnect: dev_ still points at the
             // device, so we own the free here.
             self->dev_ = nullptr;
+            self->connected_name_.clear();
             esp_hidh_dev_free(dev);  // MUST free in CLOSE handler
         } else {
             // Explicit Disconnect() already freed the device and cleared
@@ -439,6 +483,9 @@ int BluetoothKeyboard::GapEventCallback(struct ble_gap_event* event, void* arg) 
 
         if (is_keyboard && ctx->keyboard_addr_found == 0) {
             ESP_LOGI(TAG, "Keyboard selected: %s", name);
+            if (ctx->self) {
+                ctx->self->last_scan_name_ = name;
+            }
             memcpy(ctx->keyboard_addr, event->disc.addr.val, 6);
             ctx->keyboard_addr_type = event->disc.addr.type;
             ctx->keyboard_addr_found = 1;
@@ -476,6 +523,10 @@ int BluetoothKeyboard::GapEventCallback(struct ble_gap_event* event, void* arg) 
         }
         if (ctx->self) {
             ctx->self->scanning_ = false;  // scan done, resume SD-log writes
+            ctx->self->scan_found_ = (ctx->keyboard_addr_found != 0);
+            if (ctx->self->scan_complete_sem_ != nullptr) {
+                xSemaphoreGive(ctx->self->scan_complete_sem_);
+            }
         }
         delete ctx;
         return 0;
@@ -561,4 +612,103 @@ void BluetoothKeyboard::ConnectTask(void* arg) {
     delete[] args->bda;
     delete args;
     vTaskDelete(nullptr);
+}
+
+void BluetoothKeyboard::AutoReconnect() {
+    if (!bt_initialized_) {
+        ESP_LOGW(TAG, "AutoReconnect: BT not initialized");
+        return;
+    }
+    if (dev_) {
+        ESP_LOGI(TAG, "AutoReconnect: already connected");
+        return;
+    }
+    if (!has_saved_keyboard_) {
+        ESP_LOGI(TAG, "AutoReconnect: no saved keyboard");
+        return;
+    }
+    // Defensive: never connect to a zeroed address.
+    bool all_zero = true;
+    for (int i = 0; i < 6; i++) {
+        if (saved_keyboard_addr_[i] != 0) { all_zero = false; break; }
+    }
+    if (all_zero) {
+        ESP_LOGW(TAG, "AutoReconnect: saved address is zeroed, skipping");
+        return;
+    }
+    ESP_LOGI(TAG, "AutoReconnect: connecting to %s (%02x:%02x:%02x:%02x:%02x:%02x)",
+             saved_keyboard_name_.c_str(),
+             saved_keyboard_addr_[0], saved_keyboard_addr_[1],
+             saved_keyboard_addr_[2], saved_keyboard_addr_[3],
+             saved_keyboard_addr_[4], saved_keyboard_addr_[5]);
+    ConnectAsync(saved_keyboard_addr_, saved_keyboard_addr_type_);
+}
+
+// ---------------------------------------------------------------------------
+// NVS persistence of the last-connected keyboard (boot auto-reconnect)
+// ---------------------------------------------------------------------------
+
+#define KBD_NVS_NAMESPACE "kbd"
+#define KBD_NVS_KEY_ADDR "addr"
+#define KBD_NVS_KEY_ATYPE "atype"
+#define KBD_NVS_KEY_NAME "name"
+
+void BluetoothKeyboard::SaveLastKeyboardToNvs() {
+    nvs_handle_t handle;
+    if (nvs_open(KBD_NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        ESP_LOGW(TAG, "NVS open failed (save kbd)");
+        return;
+    }
+    nvs_set_blob(handle, KBD_NVS_KEY_ADDR, saved_keyboard_addr_, 6);
+    nvs_set_u8(handle, KBD_NVS_KEY_ATYPE, saved_keyboard_addr_type_);
+    nvs_set_str(handle, KBD_NVS_KEY_NAME, saved_keyboard_name_.c_str());
+    nvs_commit(handle);
+    nvs_close(handle);
+    has_saved_keyboard_ = true;
+    ESP_LOGI(TAG, "Saved keyboard for auto-reconnect: %s (%02x:%02x:%02x:%02x:%02x:%02x type=%u)",
+             saved_keyboard_name_.c_str(),
+             saved_keyboard_addr_[0], saved_keyboard_addr_[1],
+             saved_keyboard_addr_[2], saved_keyboard_addr_[3],
+             saved_keyboard_addr_[4], saved_keyboard_addr_[5],
+             saved_keyboard_addr_type_);
+}
+
+void BluetoothKeyboard::LoadLastKeyboardFromNvs() {
+    nvs_handle_t handle;
+    if (nvs_open(KBD_NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        ESP_LOGI(TAG, "No saved keyboard in NVS");
+        return;
+    }
+    size_t len = 6;
+    bool ok = (nvs_get_blob(handle, KBD_NVS_KEY_ADDR, saved_keyboard_addr_, &len) == ESP_OK &&
+               len == 6);
+    // A zeroed address (e.g. written by an earlier buggy build) is invalid;
+    // treat it as "no saved keyboard" so auto-reconnect does not attempt to
+    // connect to 00:00:00:00:00:00.
+    if (ok) {
+        bool all_zero = true;
+        for (int i = 0; i < 6; i++) {
+            if (saved_keyboard_addr_[i] != 0) { all_zero = false; break; }
+        }
+        if (all_zero) ok = false;
+    }
+    if (ok && nvs_get_u8(handle, KBD_NVS_KEY_ATYPE, &saved_keyboard_addr_type_) == ESP_OK) {
+        char name[64] = "";
+        size_t nlen = sizeof(name);
+        if (nvs_get_str(handle, KBD_NVS_KEY_NAME, name, &nlen) != ESP_OK) {
+            name[0] = '\0';
+        }
+        saved_keyboard_name_ = name;
+        has_saved_keyboard_ = true;
+        ESP_LOGI(TAG, "Loaded saved keyboard: %s (%02x:%02x:%02x:%02x:%02x:%02x type=%u)",
+                 saved_keyboard_name_.c_str(),
+                 saved_keyboard_addr_[0], saved_keyboard_addr_[1],
+                 saved_keyboard_addr_[2], saved_keyboard_addr_[3],
+                 saved_keyboard_addr_[4], saved_keyboard_addr_[5],
+                 saved_keyboard_addr_type_);
+    } else {
+        has_saved_keyboard_ = false;
+        ESP_LOGI(TAG, "No valid saved keyboard address in NVS");
+    }
+    nvs_close(handle);
 }
