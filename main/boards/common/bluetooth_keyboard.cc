@@ -293,13 +293,16 @@ void BluetoothKeyboard::HandleBootReport(const uint8_t* data, uint16_t len,
     bool shift = (modifier & HID_KBD_MOD_LSHIFT) != 0;
     for (int i = 2; i < HID_KBD_REPORT_LEN && data[i] != 0; i++) {
         on_key_press_(data[i], modifier);
-        // Also emit ASCII for printable keys (for future text-input use).
-        char ch = KeycodeToAscii(data[i], shift);
-        if (ch) {
-            ESP_LOGI(TAG, "key=0x%02x '%c'", data[i], ch);
-        } else {
-            ESP_LOGI(TAG, "key=0x%02x", data[i]);
-        }
+        // NOTE: no per-key ESP_LOGI here. This handler runs on the
+        // esp_hidh_events task; a log line whose TAG ("ble_keyboard") is
+        // matched by the board's SD-log tee triggers a synchronous SD
+        // fwrite+fflush (tens of ms), which stalls the event consumer.
+        // With the esp_hidh event queue size of only 5, repeated keys fill
+        // the queue and esp_event_post_to(portMAX_DELAY) in nimble_hidh.c
+        // blocks the NimBLE host task -> HCI stall -> device reboot
+        // (observed 1-38 min after connect). Keys are already dispatched to
+        // the main task via on_key_press_ -> Application::Schedule, so this
+        // log adds no functional value.
     }
 }
 

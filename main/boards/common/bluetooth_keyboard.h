@@ -52,7 +52,10 @@ public:
 
     /// Blocking helper for callers: maps HID keycode to ASCII char (Boot report).
     /// @note returns 0 for non-printable / unmapped keys.
-    static char KeycodeToAscii(uint8_t keycode, bool shift);
+    /// @note currently unused (per-key ASCII logging was removed in v3.4.6 to
+    /// avoid SD-log stalls on the esp_hidh_events task); kept for future
+    /// text-input use.
+    [[maybe_unused]] static char KeycodeToAscii(uint8_t keycode, bool shift);
 
 private:
     /// Scan context passed to NimBLE GAP discovery callback.

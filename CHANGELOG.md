@@ -6,6 +6,17 @@
 
 ---
 
+## v3.4.6 — 2026-08-05
+
+### fix
+- **移除按键级 SD 日志（连接后随机重启的根因修复）**：
+  - `BluetoothKeyboard::HandleBootReport` 不再对每个按键 `ESP_LOGI("key=0x%02x")`——该日志 TAG（`ble_keyboard`）被板级 SD 日志 tee 捕获，触发同步 SD `fwrite+fflush`（数十毫秒），阻塞 esp_hidh_events 任务
+  - esp_hidh 事件队列仅 5 槽；连续按键时队列积满 → `nimble_hidh.c` 的 `esp_event_post_to(..., portMAX_DELAY)` 无限期阻塞 NimBLE 主机任务 → HCI 停滞 → 控制器/系统重启（实测连接后 1-38 分钟随机出现）
+  - 按键事件已通过 `on_key_press_` → `Application::Schedule` 转移到主任务，此日志无功能价值，纯属冗余
+  - `KeycodeToAscii` 标记 `[[maybe_unused]]` 保留（未来 text-input 用途）
+
+---
+
 ## v3.4.5 — 2026-08-04
 
 ### fix
