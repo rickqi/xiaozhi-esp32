@@ -171,15 +171,48 @@ void CustomLcdDisplay::Set_ResetIOLevel(uint8_t level) {
 }
 
 void CustomLcdDisplay::RLCD_SendCommand(uint8_t Reg) {
-    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, Reg, NULL, 0));
+    esp_err_t ret = esp_lcd_panel_io_tx_param(io_handle, Reg, NULL, 0);
+    if (ret != ESP_OK) {
+        // SPI can transiently fail when a higher-priority task (e.g. NimBLE
+        // BLE scan callbacks) preempts the command's polling transmit,
+        // leaving spi_bus_device_is_polling() true -> subsequent queue
+        // transactions get ESP_ERR_INVALID_STATE. Never abort the whole
+        // device for this: retry once, then drop the frame.
+        ESP_LOGW(TAG, "RLCD cmd 0x%02x tx_param failed: %s, retrying", Reg, esp_err_to_name(ret));
+        vTaskDelay(pdMS_TO_TICKS(5));
+        ret = esp_lcd_panel_io_tx_param(io_handle, Reg, NULL, 0);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "RLCD cmd 0x%02x retry failed: %s", Reg, esp_err_to_name(ret));
+        }
+    }
 }
 
 void CustomLcdDisplay::RLCD_SendData(uint8_t Data) {
-    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(io_handle, -1, &Data, 1));
+    esp_err_t ret = esp_lcd_panel_io_tx_param(io_handle, -1, &Data, 1);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "RLCD data tx_param failed: %s, retrying", esp_err_to_name(ret));
+        vTaskDelay(pdMS_TO_TICKS(5));
+        ret = esp_lcd_panel_io_tx_param(io_handle, -1, &Data, 1);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "RLCD data retry failed: %s", esp_err_to_name(ret));
+        }
+    }
 }
 
 void CustomLcdDisplay::RLCD_Sendbuffera(uint8_t *Data, int len) {
-    ESP_ERROR_CHECK(esp_lcd_panel_io_tx_color(io_handle, -1, Data, len));
+    esp_err_t ret = esp_lcd_panel_io_tx_color(io_handle, -1, Data, len);
+    if (ret != ESP_OK) {
+        // Same rationale as RLCD_SendCommand: a transient SPI failure (e.g.
+        // polling transmit preempted during BLE scan) must not abort via
+        // ESP_ERROR_CHECK. The 1-bit reflective panel tolerates a dropped
+        // frame far better than a device reboot loop.
+        ESP_LOGW(TAG, "RLCD tx_color failed: %s, retrying", esp_err_to_name(ret));
+        vTaskDelay(pdMS_TO_TICKS(5));
+        ret = esp_lcd_panel_io_tx_color(io_handle, -1, Data, len);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "RLCD tx_color retry failed: %s, frame dropped", esp_err_to_name(ret));
+        }
+    }
 }
 
 void CustomLcdDisplay::RLCD_Reset(void) {

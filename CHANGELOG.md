@@ -6,6 +6,17 @@
 
 ---
 
+## v3.4.7 — 2026-08-05
+
+### fix
+- **LCD SPI 瞬时失败不再导致设备重启（BTSCAN 扫描后崩溃的根因修复）**：
+  - 实测：每次 BTSCAN 扫描结束后 ~1 秒设备崩溃重启（abort at `CustomLcdDisplay::RLCD_Sendbuffera`，`rst:0xc RTC_SW_CPU_RST`）
+  - 崩溃链：扫描期间 NimBLE 高优先级任务持续抢占 → `RLCD_Display()` 中 `RLCD_SendCommand(0x2C)` 的 polling 传输被抢占 → `spi_bus_device_is_polling()` 判定未终止 → `RLCD_Sendbuffera` 的 `spi_device_queue_trans` 返回 `ESP_ERR_INVALID_STATE` → 原 `ESP_ERROR_CHECK` 直接 abort → 重启循环
+  - 修复：`RLCD_SendCommand` / `RLCD_SendData` / `RLCD_Sendbuffera` 从 `ESP_ERROR_CHECK`（abort）改为**容错重试**（失败打 WARN 日志 + 5ms 延迟重试一次，仍失败丢帧打 ERROR）——1bit 反射屏可容忍丢帧，绝不允许瞬时 SPI 失败重启整机
+  - 附带诊断：重试日志输出 `esp_err_to_name()` 可读错误码，便于后续跟踪
+
+---
+
 ## v3.4.6 — 2026-08-05
 
 ### fix

@@ -290,7 +290,6 @@ void BluetoothKeyboard::HandleBootReport(const uint8_t* data, uint16_t len,
         return;
     }
     uint8_t modifier = data[0];
-    bool shift = (modifier & HID_KBD_MOD_LSHIFT) != 0;
     for (int i = 2; i < HID_KBD_REPORT_LEN && data[i] != 0; i++) {
         on_key_press_(data[i], modifier);
         // NOTE: no per-key ESP_LOGI here. This handler runs on the
