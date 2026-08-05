@@ -6,6 +6,19 @@
 
 ---
 
+## v3.5.1 — 2026-08-05
+
+### fix
+- **语音扫描命令超时（v3.5.0 回归）**：`self.scan_ble` 移除 `WaitScanComplete(13000)` 阻塞——工具回调运行在**主 Application 任务**（`app.Schedule` 单线程事件循环），阻塞 13s 使工具结果（经 `SendMcpMessage` 二次 Schedule）延迟 ~13s，超过**服务器端工具调用超时**（~10s）→ 语音必报"超时"
+  - 改为**完全非阻塞**两段式：第 1 次调用异步启动 10s 扫描立即返回；第 2 次调用（pending 已存）触发异步连接；扫描中/已连接均有明确中文状态返回
+  - 扫描本身在 NimBLE 任务异步完成（DISC_COMPLETE 存 `LastScanName()`/pending），无需阻塞主任务
+- **构建信息始终最新**：`GIT_COMMIT` 之前仅在 CMake configure 时捕获，增量构建后版本号新但 git 提交/编译时间旧（烧录 v3.5.0 时嵌入了提交前的 624e293）
+  - `main/CMakeLists.txt` 添加 `CMAKE_CONFIGURE_DEPENDS .git/HEAD`——提交后下次构建自动重新 configure
+  - 新增 `build_stamp` 目标：每次构建 touch `version_stamp.h` → `version_info.cc` 强制重编 → git 提交 + 编译时间（`__DATE__`/`__TIME__`）每次构建都新鲜
+- 版本信息显示修复：重新构建烧录后 `get_version_info` 各字段一致
+
+---
+
 ## v3.5.0 — 2026-08-05
 
 ### feat

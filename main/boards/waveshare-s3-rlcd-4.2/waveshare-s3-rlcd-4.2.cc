@@ -2111,51 +2111,48 @@ private:
             });
 
         // Scan for BLE devices (e.g. bluetooth keyboard) — voice trigger
-        // for the serial BTSCAN command. Two-phase: 1st call scans and
-        // remembers the keyboard; 2nd call connects to it. Blocks until the
-        // 10s scan completes and reports the discovered device name.
+        // for the serial BTSCAN command. Two-phase: 1st call starts an
+        // ASYNC scan and returns immediately; 2nd call (pending keyboard
+        // saved) triggers the connect. NEVER blocks: this tool runs on the
+        // main Application task, and blocking it for ~13s delayed the MCP
+        // tool result past the server's tool-call timeout -> voice "超时"
+        // (v3.5.0 regression, fixed in v3.5.1).
         mcp_server.AddTool("self.scan_ble",
             "Scan for nearby Bluetooth Low Energy (BLE) devices, typically to "
             "find and connect a bluetooth keyboard.\n"
             "Put the keyboard into pairing mode first, then call this tool. "
-            "After the scan, if a keyboard is found, call this tool a second "
-            "time to connect to it.\n"
-            "Returns a status message with the discovered keyboard name.\n"
+            "The scan runs in the background for about 10 seconds; wait, then "
+            "call this tool a second time to connect to the keyboard it found.\n"
+            "Returns a status message about the scan/connect state.\n"
             "Use this when the user asks to scan for bluetooth, scan BLE, "
             "pair a keyboard, or connect a bluetooth keyboard.",
             PropertyList(),
             [this](const PropertyList&) -> ReturnValue {
 #if CONFIG_USE_BLE_HID_KEYBOARD
-                // Already connected -> report and stop.
+                // Already connected -> report and stop (non-blocking).
                 if (bt_keyboard_.IsConnected()) {
                     std::string name = bt_keyboard_.ConnectedName();
                     return std::string("蓝牙键盘已连接：") +
                            (name.empty() ? std::string("未知设备") : name) +
                            "。无需再次扫描。";
                 }
-                bool was_pending = bt_keyboard_.HasPendingKeyboard();
-                KeyboardScanNow();
-                // Block until the 10s scan completes (or timeout) so we can
-                // report the discovered device name to the user.
-                bool found = bt_keyboard_.WaitScanComplete(13000);
+                if (bt_keyboard_.IsScanning()) {
+                    return std::string("蓝牙扫描正在进行中，请大约 10 秒后再问一次结果。");
+                }
                 std::string name = bt_keyboard_.LastScanName();
-                if (name.empty()) {
-                    name = "未知设备";
-                }
-                if (was_pending) {
-                    // This call was the connect attempt; DISC_COMPLETE kicked
-                    // off ConnectAsync on the dedicated task.
-                    if (bt_keyboard_.IsConnected()) {
-                        return std::string("蓝牙键盘已连接：") + name + "。";
-                    }
+                if (bt_keyboard_.HasPendingKeyboard()) {
+                    // Phase 2: a keyboard was found by a previous scan; this
+                    // call triggers the async connect (runs on its own task).
+                    KeyboardScanNow();
+                    if (name.empty()) name = "未知设备";
                     return std::string("正在连接键盘：") + name +
-                           "。请稍后告诉我“查询键盘状态”确认连接结果。";
+                           "。请稍后问我“查询键盘状态”确认是否连接成功。";
                 }
-                if (found || bt_keyboard_.HasPendingKeyboard()) {
-                    return std::string("扫描完成，找到键盘：") + name +
-                           "。请再说一次“扫描蓝牙”来连接它。";
-                }
-                return std::string("扫描完成，未发现蓝牙键盘。请确认键盘已进入配对模式，然后重试。");
+                // Phase 1: start the async 10s scan, return immediately.
+                KeyboardScanNow();
+                if (name.empty()) name = "未知设备";
+                return std::string("已开始扫描蓝牙设备，找到的键盘：") + name +
+                       "。请大约 10 秒后再问一次“扫描蓝牙键盘”来连接它。";
 #else
                 return std::string("BLE keyboard support is not enabled in this build");
 #endif

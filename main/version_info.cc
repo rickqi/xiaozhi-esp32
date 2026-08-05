@@ -1,5 +1,10 @@
 #include "version_info.h"
 
+// Build stamp: this header is touched by the build_stamp CMake target on every
+// `idf.py build`, forcing this translation unit to recompile so GIT_COMMIT and
+// the __DATE__/__TIME__ build timestamp always reflect the current build.
+#include "version_stamp.h"
+
 #include "board.h"
 #include "system_info.h"
 

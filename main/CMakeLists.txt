@@ -42,6 +42,8 @@ set(SOURCES "audio/audio_codec.cc"
             )
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "protocols")
+# Generated files (version_stamp.h build stamp) live in the build directory.
+list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_BINARY_DIR})
 
 # Add board common files
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
@@ -755,6 +757,22 @@ execute_process(COMMAND git -C ${PROJECT_DIR} rev-parse --short HEAD
 if(NOT GIT_COMMIT)
     set(GIT_COMMIT "unknown")
 endif()
+
+# Re-run CMake configuration whenever the git HEAD changes (new commit), so
+# GIT_COMMIT is re-captured on the next build after a commit/checkout.
+set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${PROJECT_DIR}/.git/HEAD")
+
+# Force version_info.cc (embedded GIT_COMMIT + __DATE__/__TIME__ build stamp)
+# to rebuild on EVERY `idf.py build`, even when no sources changed. The stamp
+# header is touched on each build; version_info.cc includes it, so the file is
+# recompiled and the firmware's version/build info always reflects the current
+# build, not a stale one.
+file(TOUCH ${CMAKE_CURRENT_BINARY_DIR}/version_stamp.h)
+add_custom_target(build_stamp ALL
+    COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/version_stamp.h
+    COMMENT "Updating build stamp (version_info.cc will rebuild)"
+)
 
 target_compile_definitions(${COMPONENT_LIB}
                     PRIVATE BOARD_TYPE=\"${BOARD_TYPE}\" BOARD_NAME=\"${BOARD_NAME}\"
