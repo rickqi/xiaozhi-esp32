@@ -615,7 +615,11 @@ private:
         // Independent BLE keyboard log: additionally append ble_keyboard TAG
         // lines to /sdcard/logs/ble_YYYYMMDD.txt (same mutex protects both
         // files since this runs on any task).
-        if (strstr(buf, "ble_keyboard") != nullptr) {
+        // During an active GAP scan this is SKIPPED: the NimBLE host task
+        // drives the scan callback, and a synchronous SD fwrite+fflush on
+        // every advertisement would block HCI processing -> controller
+        // buffer overflow -> device crash. Console output is unaffected.
+        if (strstr(buf, "ble_keyboard") != nullptr && !board->bt_keyboard_.IsScanning()) {
             board->log_mutex_.lock();
             if (board->OpenBleLogFile()) {
                 size_t wr = fwrite(buf, 1, len, board->ble_log_file_);

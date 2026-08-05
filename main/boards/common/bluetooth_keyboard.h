@@ -42,6 +42,9 @@ public:
     /// Whether a HID device is currently connected.
     bool IsConnected() const { return dev_ != nullptr; }
 
+    /// Whether a BLE scan is currently in progress.
+    bool IsScanning() const { return scanning_; }
+
     // --- Callbacks (all invoked on the caller's task; see Note below) ---
     void OnKeyPress(KeyCallback callback) { on_key_press_ = std::move(callback); }
     void OnConnect(Callback callback) { on_connect_ = std::move(callback); }
@@ -91,6 +94,11 @@ private:
 
     esp_hidh_dev_t* dev_ = nullptr;
     bool bt_initialized_ = false;
+    // True while a GAP discovery is in progress. Used by the board's log
+    // tee to skip SD writes for ble_keyboard lines during scanning (the
+    // NimBLE host task would otherwise be blocked on SD I/O for every
+    // advertisement, which can stall HCI processing and crash the device).
+    volatile bool scanning_ = false;
 
     // Pending keyboard address from a previous scan (connect on next BTSCAN).
     uint8_t pending_keyboard_addr_[6] = {};

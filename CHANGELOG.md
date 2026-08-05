@@ -6,6 +6,15 @@
 
 ---
 
+## v3.4.3 — 2026-08-04
+
+### fix
+- **扫描期间蓝牙日志降噪（防崩溃）**：`ble_keyboard` TAG 日志在 GAP 扫描期间跳过 SD 卡写入（仅 console 输出）——避免 NimBLE 任务被每次广播的 SD `fwrite+fflush` 阻塞，导致 HCI 缓冲溢出、控制器重置、设备重启（多次 BTSCAN 后重启的根因之一）
+  - 新增 `BluetoothKeyboard::IsScanning()` 状态（StartScan 置 true，DISC_COMPLETE 置 false）
+  - `SdLogVprintf` 检测扫描状态，扫描期间跳过 BLE 独立日志的 SD 写入
+
+---
+
 ## v3.4.2 — 2026-08-04
 
 ### fix

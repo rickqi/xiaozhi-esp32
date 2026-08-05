@@ -162,6 +162,7 @@ void BluetoothKeyboard::StartScan(uint32_t seconds) {
         ESP_LOGE(TAG, "ble_gap_disc failed: %d", rc);
         delete ctx;
     } else {
+        scanning_ = true;  // suppress SD-log writes for BLE lines during scan
         ESP_LOGI(TAG, "Scanning for BLE keyboards (%us)...", seconds);
     }
 #else
@@ -465,6 +466,9 @@ int BluetoothKeyboard::GapEventCallback(struct ble_gap_event* event, void* arg) 
         } else {
             ESP_LOGI(TAG, "Scan complete, no keyboard found (reason=%d)",
                      event->disc_complete.reason);
+        }
+        if (ctx->self) {
+            ctx->self->scanning_ = false;  // scan done, resume SD-log writes
         }
         delete ctx;
         return 0;
