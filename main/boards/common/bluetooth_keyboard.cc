@@ -85,9 +85,12 @@ esp_err_t BluetoothKeyboard::HostInit() {
 
     // Just Works pairing: no display/input on device
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
-    ble_hs_cfg.sm_bonding = 1;
+    // TEMP VERIFICATION (v3.4.4): disable bonding + SC to test whether the
+    // 30s post-connect reboot is caused by SMP pairing timeout. Revert to
+    // sm_bonding=1 / sm_sc=1 once the root cause is confirmed and fixed.
+    ble_hs_cfg.sm_bonding = 0;
     ble_hs_cfg.sm_mitm = 0;   // MUST be 0 for NO_INPUT_OUTPUT
-    ble_hs_cfg.sm_sc = 1;     // LE Secure Connections
+    ble_hs_cfg.sm_sc = 0;     // LE Secure Connections (disabled for test)
 
     // Persist bonding keys to NVS. This wires ble_hs_cfg.store_read_cb /
     // store_write_cb / store_delete_cb to the NVS-backed store so a paired

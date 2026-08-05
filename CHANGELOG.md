@@ -6,6 +6,17 @@
 
 ---
 
+## v3.4.4 — 2026-08-04
+
+### fix
+- **验证"连接成功 30-40 秒后重启"根因（SMP 配对超时）**：
+  - 临时禁用 LE Secure Connections 配对（`sm_bonding=0, sm_sc=0`，标记 TEMP VERIFICATION）——验证假设
+  - `CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE` 4096→8192（防 SC 配对 ECDH 栈溢出）
+  - 实测：连接后持续稳定（uptime 3 小时无崩溃），30-40s 重启消失 → 确认 SMP 配对超时是根因
+- **注意**：禁配对为临时验证，最终方案待定（保持禁配对 / 恢复配对修 own_addr_type / 恢复配对优雅处理超时）
+
+---
+
 ## v3.4.3 — 2026-08-04
 
 ### fix
