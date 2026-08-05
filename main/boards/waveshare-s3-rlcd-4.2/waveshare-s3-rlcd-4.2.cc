@@ -2189,6 +2189,40 @@ private:
 #endif
             });
 
+        // Overview of all voice commands, grouped by category (voice queryable)
+        mcp_server.AddTool("self.get_voice_commands",
+            "List ALL voice commands supported by this device, grouped by "
+            "category, with the phrase the user should say for each.\n"
+            "Use this when the user asks what they can say, what voice "
+            "commands exist, what functions are available, or how to control "
+            "the device by voice (e.g. \"有哪些语音命令\", \"你能做什么\", "
+            "\"语音功能有哪些\", \"怎么用语音控制\").",
+            PropertyList(),
+            [](const PropertyList&) -> ReturnValue {
+                return std::string(
+                    "本设备支持以下语音命令，按分类介绍："
+                    "一、蓝牙键盘：说“扫描蓝牙键盘”，可扫描并连接蓝牙键盘；"
+                    "说“键盘连上了吗”，查询键盘连接状态；"
+                    "说“键盘有哪些快捷键”，了解键盘按键功能。"
+                    "二、环境与状态：说“现在室温多少度”，查询温湿度；"
+                    "说“电量多少”，查询电池电量；"
+                    "说“你的版本是多少”或“你都有什么功能”，查看固件版本与功能清单。"
+                    "三、录音：说“帮我录一段十秒的备忘录”，录制语音；"
+                    "说“播放刚才的录音”，播放录音；"
+                    "说“列出录音”或“删除录音”，管理录音文件。"
+                    "四、音乐：说“放首歌听听”，播放 SD 卡音乐；"
+                    "说“音乐停一下”，停止播放；"
+                    "说“列出歌单”或“删除歌曲”，管理音乐。"
+                    "五、对话日志：说“最近聊了什么”，查看对话历史；"
+                    "说“那次对话说了什么”，查看对话摘要；"
+                    "说“听一下对话录音”，播放对话语音；说“删除对话日志”清理记录。"
+                    "六、系统管理：说“自检一下设备”，运行硬件自检；"
+                    "说“查询自检结果”，获取自检结果；"
+                    "说“打开文件服务器”或“关闭文件服务器”，管理网页文件服务；"
+                    "说“设置一个十分钟的定时器”，设定倒计时提醒；"
+                    "说“重新配网”，进入 WiFi 配网模式。");
+            });
+
         // BLE keyboard hotkey reference (voice queryable)
         mcp_server.AddTool("self.get_ble_keyboard_shortcuts",
             "List all Bluetooth keyboard shortcut keys and their actions supported by this device.\n"
