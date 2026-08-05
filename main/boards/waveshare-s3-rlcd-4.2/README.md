@@ -109,6 +109,7 @@ I (21836) waveshare_rlcd_4_2: SELFTEST SelfTest: 7/7 ALL PASS
 | `HTTPSTART` | 启动 WiFi HTTP 文件服务器 |
 | `HTTPSTOP` | 停止 HTTP 文件服务器 |
 | `BTSCAN` | 扫描并连接 BLE 键盘（先让键盘进入配对模式） |
+| `BTSTATUS` | 查询 BLE 键盘连接状态（`BTSTATUS: CONNECTED` / `DISCONNECTED`） |
 
 ### 5. 音乐播放（MP3）
 

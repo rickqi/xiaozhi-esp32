@@ -6,6 +6,16 @@
 
 ---
 
+## v3.4.8 — 2026-08-05
+
+### feat
+- **新增串口命令 `BTSTATUS`**：随时查询 BLE 键盘连接状态，输出 `BTSTATUS: CONNECTED` / `BTSTATUS: DISCONNECTED`
+  - 基于 `BluetoothKeyboard::IsConnected()`（`dev_ != nullptr`，OPEN_EVENT 置位 / CLOSE_EVENT·Disconnect 清空）
+  - 新增 `CustomBoard::KeyboardIsConnected()` public 访问方法
+  - 文档 `docs/usage.md` 与板 README 串口命令表同步更新
+
+---
+
 ## v3.4.7 — 2026-08-05
 
 ### fix

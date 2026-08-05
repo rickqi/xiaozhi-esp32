@@ -352,6 +352,11 @@ private:
 #endif
     }
 
+    /// Whether a BLE keyboard is currently connected (host-side HID handle open).
+    /// Exposed for the serial `BTSTATUS` command; dev_ is set on OPEN_EVENT and
+    /// cleared on CLOSE_EVENT / explicit Disconnect().
+    bool KeyboardIsConnected() const { return bt_keyboard_.IsConnected(); }
+
     void AdjustVolume(int delta) {
         auto codec = Board::GetInstance().GetAudioCodec();
         if (codec) {
@@ -2489,6 +2494,10 @@ private:
                 } else if (strcmp(line, "BTSCAN") == 0) {
                     ESP_LOGI(TAG, "BLE keyboard scan requested via serial");
                     board->KeyboardScanNow();
+                } else if (strcmp(line, "BTSTATUS") == 0) {
+                    bool conn = board->KeyboardIsConnected();
+                    printf("BTSTATUS: %s\n", conn ? "CONNECTED" : "DISCONNECTED");
+                    fflush(stdout);
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(10));

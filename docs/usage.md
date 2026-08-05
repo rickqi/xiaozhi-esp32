@@ -97,6 +97,7 @@ idf.py -p $env:XIAOZHI_PORT flash
 | `HTTPSTART` | 启动 WiFi HTTP 文件服务器 | `HTTP: started: http://<IP>:80/` |
 | `HTTPSTOP` | 停止 HTTP 文件服务器 | `HTTP: stopped` |
 | `BTSCAN` | 扫描并连接 BLE 键盘（先让键盘进入配对模式） | 扫描日志 + 连接结果 |
+| `BTSTATUS` | 查询 BLE 键盘连接状态 | `BTSTATUS: CONNECTED` / `BTSTATUS: DISCONNECTED` |
 
 使用 `idf.py monitor` 或任意串口工具（115200）即可交互。
 
