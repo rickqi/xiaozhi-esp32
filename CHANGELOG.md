@@ -6,6 +6,17 @@
 
 ---
 
+## v3.4.5 — 2026-08-04
+
+### fix
+- **恢复蓝牙配对（方案 B）+ 修复 own_addr_type 根因**：
+  - 恢复 `sm_bonding=1, sm_sc=1`（v3.4.4 为验证 SMP 超时假设临时禁用）
+  - **本地 patch ESP-IDF `nimble_hidh.c`**：`own_addr_type` 从硬编码 0（PUBLIC）改为 `ble_hs_id_infer_auto(0, &type)`——设备用随机/RPA 地址时，硬编码 PUBLIC 导致 bond key 绑定错误地址类型 → SMP 配对卡死 → 30s 超时 → 重启（根因修复）
+  - 保留 `CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192`（防 SC 配对 ECDH 栈溢出）
+  - ⚠️ **注意**：IDF patch 位于 `D:\esp\esp-idf\components\esp_hid\src\nimble_hidh.c`，升级 ESP-IDF 需重新应用（见 AGENTS.md）
+
+---
+
 ## v3.4.4 — 2026-08-04
 
 ### fix
