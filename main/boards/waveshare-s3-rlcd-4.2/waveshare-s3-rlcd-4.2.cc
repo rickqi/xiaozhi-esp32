@@ -2080,6 +2080,29 @@ private:
                 return std::string("Error: music file not found or delete failed: " + filename);
             });
 
+        // Scan for BLE devices (e.g. bluetooth keyboard) — voice trigger
+        // for the serial BTSCAN command. Shows the spinning BLE icon while
+        // scanning; the icon becomes the solid bluetooth glyph on connect.
+        mcp_server.AddTool("self.scan_ble",
+            "Scan for nearby Bluetooth Low Energy (BLE) devices, typically to "
+            "find and connect a bluetooth keyboard.\n"
+            "Put the keyboard into pairing mode first, then call this tool. "
+            "After the scan, if a keyboard is found, call this tool a second "
+            "time to connect to it.\n"
+            "Returns a status message about the scan.\n"
+            "Use this when the user asks to scan for bluetooth, scan BLE, "
+            "pair a keyboard, or connect a bluetooth keyboard.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+#if CONFIG_USE_BLE_HID_KEYBOARD
+                KeyboardScanNow();
+                return std::string("BLE scan started. If you want to connect a keyboard, "
+                                   "make sure it is in pairing mode, then ask me to scan again.");
+#else
+                return std::string("BLE keyboard support is not enabled in this build");
+#endif
+            });
+
         // Run hardware self-test (display, buttons, SD, battery, RTC, SHTC3, audio)
         mcp_server.AddTool("self.run_self_test",
             "Run a hardware self-test on the device: verifies the display, buttons, SD card read/write, "

@@ -67,6 +67,7 @@ I (21836) waveshare_rlcd_4_2: SELFTEST SelfTest: 7/7 ALL PASS
 | `self.run_self_test` | 触发硬件自检 |
 | `self.get_self_test_result` | 获取上次自检 JSON 结果 |
 | `self.get_version_info` | 查询固件版本 / 构建信息 / 功能清单 / 烧录信息（语音可调用） |
+| `self.scan_ble` | 扫描并连接蓝牙键盘（语音触发，先让键盘进配对模式） |
 | `self.list_chatlogs` | 列出对话日志（默认）或系统日志（directory 参数可选 chatlogs/system_logs） |
 | `self.get_chatlog_summary` | 获取指定对话的文本摘要（最多 50 轮） |
 | `self.play_chatlog_audio` | 播放指定对话音频（可选声道 mixed/mic/ai） |

@@ -6,6 +6,16 @@
 
 ---
 
+## v3.4.1 — 2026-08-04
+
+### feat
+- **语音命令扫描蓝牙（MCP 工具 `self.scan_ble`）**：AI 对话可直接触发蓝牙扫描（替代仅串口 BTSCAN）
+  - 描述引导 AI：先让键盘进配对模式 → 调用一次扫描 → 发现键盘后再调用一次连接
+  - 实现：`InitializeTools()` 注册 `self.scan_ble`（无参），直接复用 `KeyboardScanNow()`（含 SPINNER 图标更新 + `StartScan(10)`）
+  - 线程安全：复用现有路径（MCP 回调 → KeyboardScanNow → Schedule 处理 UI 图标）
+
+---
+
 ## v3.4.0 — 2026-08-04
 
 ### feat
