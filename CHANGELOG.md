@@ -6,6 +6,16 @@
 
 ---
 
+## v3.4.2 — 2026-08-04
+
+### fix
+- **修复蓝牙键盘连接成功后立即被断开**（多次扫描后重启的根因之一）：
+  - 根因：`ConnectTask` 在 `Connect()` 返回后**无条件**执行 stale 连接清理——连接成功时 `ble_gap_conn_find_by_addr` 也会找到刚建立的连接并 `ble_gap_terminate` 杀掉（实测日志：`OPEN: MIIIW MECH-KB Pro` → `BLE keyboard connected` → `Terminating stale BLE connection handle=1`）
+  - 修复：仅当 `Connect()` **失败**（`dev_ == nullptr`）时才清理 stale 连接；成功时保留活动连接（打印 `Connect success: keeping active BLE connection`）
+  - 效果：键盘连接后持续保持（不再 200ms 后断开），消除反复连接/断开循环
+
+---
+
 ## v3.4.1 — 2026-08-04
 
 ### feat

@@ -518,23 +518,32 @@ void BluetoothKeyboard::ConnectTask(void* arg) {
         // Give the esp_hidh event loop a moment to settle, then clean up.
         vTaskDelay(pdMS_TO_TICKS(200));
 #ifdef CONFIG_BT_NIMBLE_ENABLED
-        // Clean up any stale NimBLE connection to this peer. The previous
-        // code used BLE_HS_CONN_HANDLE_NONE (0xFFFF = invalid) which ALWAYS
-        // failed, leaking the connection context. With
+        // Clean up any stale NimBLE connection to this peer — but ONLY when
+        // the connect FAILED (self->dev_ == nullptr). When Connect()
+        // succeeded, self->dev_ holds the active HID device and the NimBLE
+        // connection is legitimately up; terminating it here would kill a
+        // freshly established keyboard link (observed: "OPEN: MIIIW ..."
+        // then immediately "Terminating stale BLE connection handle=1").
+        // The previous code used BLE_HS_CONN_HANDLE_NONE (0xFFFF = invalid)
+        // which ALWAYS failed, leaking the connection context. With
         // CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1, one leaked connection blocks
         // every subsequent ble_gap_connect() -> ESP_ERR_NO_MEM (0x101) crash
-        // on the second connect attempt. Look up the real handle by address.
-        ble_addr_t peer;
-        memcpy(peer.val, args->bda, 6);
-        peer.type = args->addr_type;
-        struct ble_gap_conn_desc desc;
-        int rc = ble_gap_conn_find_by_addr(&peer, &desc);
-        if (rc == 0 && desc.conn_handle != BLE_HS_CONN_HANDLE_NONE) {
-            ESP_LOGI(TAG, "Terminating stale BLE connection handle=%u", desc.conn_handle);
-            // 0x13 = Remote User Terminated Connection (HCI error code)
-            ble_gap_terminate(desc.conn_handle, 0x13);
-        } else if (rc != BLE_HS_ENOTCONN) {
-            ESP_LOGI(TAG, "Connect cleanup: no stale conn (rc=%d)", rc);
+        // on the second connect attempt.
+        if (self->dev_ == nullptr) {
+            ble_addr_t peer;
+            memcpy(peer.val, args->bda, 6);
+            peer.type = args->addr_type;
+            struct ble_gap_conn_desc desc;
+            int rc = ble_gap_conn_find_by_addr(&peer, &desc);
+            if (rc == 0 && desc.conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+                ESP_LOGI(TAG, "Terminating stale BLE connection handle=%u", desc.conn_handle);
+                // 0x13 = Remote User Terminated Connection (HCI error code)
+                ble_gap_terminate(desc.conn_handle, 0x13);
+            } else if (rc != BLE_HS_ENOTCONN) {
+                ESP_LOGI(TAG, "Connect cleanup: no stale conn (rc=%d)", rc);
+            }
+        } else {
+            ESP_LOGI(TAG, "Connect success: keeping active BLE connection (dev=%p)", (void*)self->dev_);
         }
 #endif
     }
