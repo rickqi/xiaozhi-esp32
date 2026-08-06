@@ -15,6 +15,11 @@
 - **P0 验证**：本板 assets 分区已含 `font_puhui_common_30_4.bin`（30px 全量 18000+ 字，2.5MB）——动态中文缺字已由 assets 全量字体解决，fallback 为保险层
 - 功能清单（kFeatures）同步更新
 
+### docs
+- **字体系统设计文档**（`docs/font-system-design.md`）：完整可移植方案——双层字体架构、cbin 格式、assets mmap blob、生成流程、渲染链路、移植指南、局限解决状态
+- **内存模型补充**：LVGL 9.3.0 软件渲染无字形缓存（每字形仅 ~1KB 暂存缓冲复用，fallback 零成本）；现有 vs 完整方案内存对比（v3.7.0 内存中立）
+- **AGENTS.md 更新**：版本演进至 v3.7.0、MCP 工具阻塞约束、蓝牙键盘两段式/RPA/自动重连、字体系统要点、pyparsing/GIT_COMMIT/僵尸进程等陷阱
+
 ---
 
 ## v3.6.2 — 2026-08-05
