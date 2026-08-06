@@ -1269,6 +1269,18 @@ void LcdDisplay::SetTheme(Theme* theme) {
         lv_obj_set_style_text_font(battery_label_, icon_font, 0);
         lv_obj_set_style_text_font(network_label_, icon_font, 0);
     }
+    // Also refresh icon fonts on labels that were only styled at SetupUI()
+    // time (v3.7.0) - otherwise an assets icon_font override would not show
+    // on these (they are not re-styled here otherwise).
+    if (bluetooth_label_ != nullptr) {
+        lv_obj_set_style_text_font(bluetooth_label_, icon_font, 0);
+    }
+    if (status_icon_label_ != nullptr) {
+        lv_obj_set_style_text_font(status_icon_label_, icon_font, 0);
+    }
+    if (emoji_label_ != nullptr) {
+        lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
+    }
 
     // Set parent text color
     lv_obj_set_style_text_font(screen, text_font, 0);

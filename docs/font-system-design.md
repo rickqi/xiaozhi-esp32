@@ -348,15 +348,27 @@ lv_obj_set_style_text_font(screen, text_font->font(), 0);
 
 ---
 
-## 11. 已知局限与改进建议
+## 11. 已知局限与改进（v3.7.0 已解决部分）
 
-| 局限 | 影响 | 建议 |
-|---|---|---|
-| **无 fallback 链**（`.fallback = NULL`） | 缺字渲染空白 | LVGL v9 支持 fallback 链，可叠加 basic+全量 |
-| **basic 子集仅 ~314 字** | LLM 动态中文可能缺字 | 换 `common` 全量（assets 已含）或内置 `puhui_14_1` |
-| **仅 text_font 可覆盖** | 图标字体不可运行时换 | 扩展 index.json 加 icon_font 字段 |
-| **1bpp 无抗锯齿** | 单色屏大字号边缘生硬 | 单色屏固有局限；可选 2bpp 折中 |
-| **cbin 为上游私有格式** | 格式文档依赖组件 | 已在本文 3.2 记录结构，组件已开源 |
+> 以下前三项已在 **v3.7.0** 实施解决（详见 CHANGELOG）：
+
+| 局限 | 影响 | 状态（v3.7.0） | 实现 |
+|---|---|---|---|
+| **无 fallback 链**（`.fallback = NULL`） | 缺字渲染空白 | ✅ **已解决** | assets 全量 cbin 字体（堆分配可写）`fallback` 指向编译内置 basic（`main/assets.cc` Apply 内）；LVGL 9 递归解析 |
+| **basic 子集仅 ~314 字** | LLM 动态中文可能缺字 | ✅ **已解决** | 本板 assets 已含 `font_puhui_common_30_4.bin`（全量 18000+ 字）自动覆盖；fallback 为保险层 |
+| **仅 text_font 可覆盖** | 图标字体不可运行时换 | ✅ **已解决** | index.json 支持 `icon_font`/`large_icon_font` 键；修复 `LcdDisplay::SetTheme()` 未刷新 3 个图标 label 的 gap |
+| **1bpp 无抗锯齿** | 单色屏大字号边缘生硬 | ⏳ 未解决 | 单色屏固有局限；可选 2bpp 折中（需上游重新生成） |
+| **cbin 为上游私有格式** | 格式文档依赖组件 | ✅ 缓解 | 已在本文 3.2 记录结构，组件已开源 |
+| **缺字无可见提示** | 调试困难 | ✅ **已解决** | `CONFIG_LV_USE_FONT_PLACEHOLDER=y`——缺字渲染可见占位框 |
+
+**关键实现洞察（可移植）**：
+- ESP32 上 `const` 字体在 flash **不可写** → 不能直接改 `.fallback`
+- 但 **cbin 字体由 `cbin_font_create()` 堆分配（RAM 可写）** → 加载后直接设 `font->fallback` 即可
+- fallback 链两字体**必须同像素尺寸**（`<size>_<bpp>` 匹配），否则行高/advance 不一致导致跳动
+
+**待实施建议（如后续需要）**：
+1. `2bpp` 折中抗锯齿（单色屏大字号）
+2. assets-generator（独立仓库）同步输出 `icon_font`/`large_icon_font` 键
 
 ---
 

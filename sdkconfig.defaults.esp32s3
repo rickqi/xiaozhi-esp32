@@ -72,3 +72,6 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y
 
 # NimBLE host task stack: 4096 -> 8192 to avoid SC pairing ECDH stack overflow (30s post-connect reboot suspect).
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
+
+# Font placeholder: render a visible box for missing glyphs instead of blank (debug aid for font coverage).
+CONFIG_LV_USE_FONT_PLACEHOLDER=y

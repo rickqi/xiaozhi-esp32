@@ -6,6 +6,17 @@
 
 ---
 
+## v3.7.0 — 2026-08-05
+
+### feat
+- **字体 fallback 链**：assets 全量字体（cbin，堆分配可写）的 `fallback` 指向编译内置 basic 字体——全量字体缺字时自动回退渲染（LVGL 9 递归解析），不再显示零宽空白；两字体同尺寸保证行高一致（`main/assets.cc` Apply 内）
+- **图标字体运行时覆盖**：index.json 支持 `icon_font` / `large_icon_font` 键（镜像 text_font 机制），可 OTA 定制状态栏/表情图标；修复 `LcdDisplay::SetTheme()` 未刷新 `bluetooth_label_`/`status_icon_label_`/`emoji_label_` 的 gap
+- **开启字体占位符**：`CONFIG_LV_USE_FONT_PLACEHOLDER=y`——缺字渲染可见占位框（调试字体覆盖缺口）
+- **P0 验证**：本板 assets 分区已含 `font_puhui_common_30_4.bin`（30px 全量 18000+ 字，2.5MB）——动态中文缺字已由 assets 全量字体解决，fallback 为保险层
+- 功能清单（kFeatures）同步更新
+
+---
+
 ## v3.6.2 — 2026-08-05
 
 ### feat

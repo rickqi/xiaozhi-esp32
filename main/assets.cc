@@ -160,6 +160,14 @@ bool Assets::Apply() {
                 ESP_LOGE(TAG, "Failed to load fonts.bin");
                 return false;
             }
+            // Fallback chain (v3.7.0): the cbin font is heap-allocated (writable).
+            // Point its fallback at the compiled-in basic font so any glyph
+            // missing from the assets full-CJK font still renders instead of
+            // showing a blank (LVGL 9 resolves fallback recursively). Sizes are
+            // matched (both <size>_<bpp>), so line metrics stay consistent.
+            LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
+            lv_font_t* text_font_handle = const_cast<lv_font_t*>(text_font->font());
+            text_font_handle->fallback = &BUILTIN_TEXT_FONT;
             if (light_theme != nullptr) {
                 light_theme->set_text_font(text_font);
             }
@@ -168,6 +176,42 @@ bool Assets::Apply() {
             }
         } else {
             ESP_LOGE(TAG, "The font file %s is not found", fonts_text_file.c_str());
+        }
+    }
+
+    // Icon fonts can also be overridden from assets (v3.7.0): same cbin
+    // mechanism as text_font. Keys are optional - absent means keep the
+    // compiled-in font_awesome icons.
+    cJSON* icon_font_json = cJSON_GetObjectItem(root, "icon_font");
+    if (cJSON_IsString(icon_font_json)) {
+        if (GetAssetData(icon_font_json->valuestring, ptr, size)) {
+            auto icon_font = std::make_shared<LvglCBinFont>(ptr);
+            if (icon_font->font() != nullptr) {
+                if (light_theme != nullptr) {
+                    light_theme->set_icon_font(icon_font);
+                }
+                if (dark_theme != nullptr) {
+                    dark_theme->set_icon_font(icon_font);
+                }
+            }
+        } else {
+            ESP_LOGE(TAG, "The icon font file %s is not found", icon_font_json->valuestring);
+        }
+    }
+    cJSON* large_icon_font_json = cJSON_GetObjectItem(root, "large_icon_font");
+    if (cJSON_IsString(large_icon_font_json)) {
+        if (GetAssetData(large_icon_font_json->valuestring, ptr, size)) {
+            auto large_icon_font = std::make_shared<LvglCBinFont>(ptr);
+            if (large_icon_font->font() != nullptr) {
+                if (light_theme != nullptr) {
+                    light_theme->set_large_icon_font(large_icon_font);
+                }
+                if (dark_theme != nullptr) {
+                    dark_theme->set_large_icon_font(large_icon_font);
+                }
+            }
+        } else {
+            ESP_LOGE(TAG, "The large icon font file %s is not found", large_icon_font_json->valuestring);
         }
     }
 
