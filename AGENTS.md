@@ -79,11 +79,12 @@ s.write(b'CHATLOGLIST\n'); s.flush(); time.sleep(3); print(s.read(4096).decode('
 
 | 分支 | 说明 |
 |---|---|
-| `master` | **当前工作分支**，定制功能线（v2.3.0），已推送 origin |
+| `master` | **当前工作分支**，定制功能线（当前 v3.7.0），已推送 origin |
 | `rebuild-v2.4` | 官方 v2.4.0 基线 + 移植功能，本地实验分支，未推送 |
 | `origin/main` / `origin/master` | 远程（origin = `https://github.com/rickqi/xiaozhi-esp32.git`） |
 
 > master 与 rebuild-v2.4 **无共同祖先**，不可直接 merge/cherry-pick。
+> 版本演进：v3.2.x 蓝牙键盘 MVP → v3.4.x 连接稳定性修复（SD 日志/LCD SPI/配对）→ v3.5.x 语音扫描/自动重连/构建信息更新 → v3.6.x 帮助类语音工具 → v3.7.0 字体系统（fallback 链/图标覆盖）。
 
 **提交规范**：`feat:` / `fix:` 前缀 + 中文或英文描述。多行 message 用 `git commit -F <file>` 避免 PowerShell 解析问题（圆括号、反引号会被 shell 误解析）。
 
@@ -94,6 +95,8 @@ s.write(b'CHATLOGLIST\n'); s.flush(); time.sleep(3); print(s.read(4096).decode('
 **版本号唯一来源**：`CMakeLists.txt:7` 的 `set(PROJECT_VER "...")`，自动注入 `esp_app_desc_t.version`，传播到 OTA / 显示 / MCP / User-Agent。
 
 **Git 提交戳**：`main/CMakeLists.txt` 在构建时执行 `git rev-parse --short HEAD`，通过 `GIT_COMMIT` 宏嵌入固件（失败回退 `"unknown"`）。
+- v3.5.1 起：`CMAKE_CONFIGURE_DEPENDS .git/HEAD`（提交后自动重新 configure）+ `build_stamp` 目标每次构建强制重编 `version_info.cc`（git 提交 + 编译时间始终新鲜）。
+- **⚠️ 烧录前先提交**：若在提交前烧录，固件嵌入的是**旧 HEAD 的 GIT_COMMIT**（v3.5.0 曾嵌入提交前的 624e293，版本信息显示"版本新但提交旧"）。烧录前先 `git commit` 再 `idf.py flash`。
 
 ### 版本 bump 判断准则
 
@@ -163,7 +166,20 @@ CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=y
 
 > `self.get_system_info` 是 user-only（AI 不可见）；如需语音查询版本/系统信息，用 `AddTool` 注册的 `self.get_version_info`。
 
+**语音可调用工具全家桶（AddTool，板级 ~25 + 框架级 3）**：
+- 蓝牙键盘：`self.scan_ble`（两段式扫描+连接）、`self.get_ble_keyboard_status`（连接状态）、`self.get_ble_keyboard_shortcuts`（快捷键）
+- 帮助类：`self.get_voice_commands`（按分类介绍全部语音命令）、`self.get_mcp_help`（带可选 `tool_name` 参数——不填返回全部工具概览，填工具名返回该工具详细用法）
+- 其他：环境/录音/音乐/对话日志/自检/文件服务器/定时器（见 `docs/usage.md` MCP 表）
+
 ReturnValue 类型：`std::variant<bool, int, std::string, cJSON*, ImageContent*>`。返回 `cJSON*` 会被自动释放；返回 `std::string` 让 LLM 自然语言播报。
+
+### MCP 工具回调必须非阻塞（关键！）
+
+**所有 `AddTool` 回调运行在 `app_main` 主任务**（`McpServer::DoToolCall` → `app.Schedule()` → `Application::Run()` 单线程事件循环）。工具结果经 `SendMcpMessage` **再次 Schedule** 发送。
+
+- **阻塞 >5s → 语音命令必报"超时"**：服务器端 MCP 工具调用超时窗口 ~10s，设备 13s 阻塞必然超时（v3.5.0 教训：`self.scan_ble` 曾 `WaitScanComplete(13000)` 阻塞主任务 → 语音全超时，v3.5.1 改异步）。
+- 耗时操作（扫描/连接/录音）→ 启动异步任务（`xTaskCreate`）立即返回，结果供后续查询；回调内**绝不做同步等待**。
+- 阻塞主任务还会饿死音频上传/UI/状态机。
 
 ### 音频暂停/恢复（关键！）
 
@@ -194,22 +210,41 @@ ReturnValue 类型：`std::variant<bool, int, std::string, cJSON*, ImageContent*
 
 ### 串口命令
 
-在 `ScreenshotCmdTask`（`fgets(stdin)` 循环）中处理：`SHOOT`、`LIST`、`LOG`、`SELFTEST`、`CHATLOG`（造测试数据）、`CHATLOGLIST`、`MUSICLIST`、`MUSICPLAY <名>`、`MUSICSTOP`。
+在 `ScreenshotCmdTask`（`fgets(stdin)` 循环）中处理：`SHOOT`、`LIST`、`LOG`、`SELFTEST`、`CHATLOG`（造测试数据）、`CHATLOGLIST`、`MUSICLIST`、`MUSICPLAY <名>`、`MUSICSTOP`、`BTSCAN`（扫描/连接 BLE 键盘，需发两次：第 1 次扫描记住地址，第 2 次连接）、`BTSTATUS`（查询键盘连接状态，输出 `CONNECTED`/`DISCONNECTED`）。
+
+### 蓝牙键盘（BLE HID）
+
+- **两段式连接**：`BTSCAN` 或语音 `self.scan_ble` 需调用两次——第 1 次扫描保存 pending 地址，第 2 次触发连接（防自动连接不可达键盘的内存泄漏，v3.2.1 教训）。
+- **RPA 地址轮换**：MIIIW 键盘每次重广播地址都变（`df:3b:27:5e:XX:d5` 末字节轮换）——自动重连可能因地址失效而失败，静默等待手动 BTSCAN 即可。
+- **自动重连（v3.5.0）**：连接成功键盘地址持久化 NVS（namespace `kbd`）；开机 8s 后**仅定向连接**该地址（绝不扫描 → 零泄漏）；NVS 中全零地址视为无效跳过。
+- **快捷键**：Enter=对话 / Esc=停止 / Space=监听 / ↑↓=音量 / R=截图 / T=录音 / M=静音 / V=版本 / Tab=提示音 / 数字键 1-9（在 `HandleKeyboardKey()`，约 L381）。
+
+### 字体系统（v3.7.0）
+
+- **双层**：内置 `font_puhui_basic_30_4`（flash）+ assets 全量 `font_puhui_common_30_4.bin`（mmap 零拷贝，18000+ 字）；版本弹窗另用 `font_puhui_basic_14_1`。
+- **LVGL 9.3.0 软件渲染无字形缓存**（v8 缓存已移除）——fallback 链零额外 RAM。
+- assets 分区是**自定义 mmap blob**（非真 SPIFFS）：44 字节/文件条目 + `0x5A5A` 魔数 + 16 位校验和，格式见 `docs/font-system-design.md`。
+- **fallback 设置**：flash 中 const 字体不可写；用堆分配的 cbin 字体（`cbin_font_create()`）直接赋 `font->fallback`（v3.7.0 已实现于 `assets.cc` Apply 内）。
 
 ---
 
 ## 板文件结构
 
-`waveshare-s3-rlcd-4.2.cc` 是**单文件巨模块**（~1900 行），包含：I2C/RTC/SHTC3 驱动、SD 卡管理、录音/音乐/chatlog 管理、MCP 工具注册、自检、截图、串口命令。改动通常都在这一个文件里。
+`waveshare-s3-rlcd-4.2.cc` 是**单文件巨模块**（~3100 行），包含：I2C/RTC/SHTC3 驱动、SD 卡管理、录音/音乐/chatlog 管理、MCP 工具注册、自检、截图、串口命令、蓝牙键盘回调。改动通常都在这一个文件里。
 
 ---
 
 ## 常见陷阱
 
-1. **串口被占用** → 烧录失败"port is busy"：终止残留 monitor 进程后重试（端口见 `detect_env.py` 检测结果）
+1. **串口被占用** → 烧录失败"port is busy"/`PermissionError: 拒绝访问`：检查残留进程（`Get-CimInstance Win32_Process | Where-Object {$_.CommandLine -match 'COM3|idf.py|esptool|ninja'}`），终止 `idf.py`/`ninja`/`esptool`/`ldgen.py` 僵尸进程后重试；有时等待几秒 USB 重新枚举即可
 2. **PowerShell commit message** → 圆括号/反引号被解析：用 `git commit -F <文件>`
 3. **`ReadShtc3` 未使用警告**（lcd_display.cc:1004）→ 预先存在，非新增，不需修复
 4. **第三方警告**（esp_video/ioctl.h `_IO` redefined）→ 预先存在，忽略
 5. **音乐播放后设备变聋** → 必须调 `ResumeAudioService()`
 6. **中文文件名乱码** → 确认 FATFS 三件套配置齐全
 7. **版本号不生效** → 只改 `CMakeLists.txt:7` 的 `PROJECT_VER`，不是 sdkconfig
+8. **MCP 工具回调阻塞 >5s** → 语音必报"超时"（服务器工具超时 ~10s）：耗时操作转异步任务，回调立即返回
+9. **构建失败 `UnboundLocalError: pre_loc`（pyparsing）** → IDF 5.5.2 需 `pyparsing>=3.1.0,<3.3`；3.2.0 有 bug 导致 `ldgen.py` 崩。`pip install pyparsing==3.2.1` 后重构建（勿装 3.3.x，不满足 IDF 约束）
+10. **版本信息"版本新但提交旧"** → 烧录前先 `git commit`（GIT_COMMIT 构建时注入旧 HEAD，见版本管理节）
+11. **LCD SPI 瞬时失败**（`panel_io_spi_tx_color`）→ 已容错（v3.4.7）：RLCD 发送失败重试不 abort，扫描期间 NimBLE 抢占可能触发，属正常 WARN
+12. **`idf.py build` 偶发挂起** → 超时后无进程残留再重跑；或改用 `cmd /c "call %IDF_PATH%\export.bat >nul 2>&1 && idf.py build"`（export.ps1 偶发异常）
