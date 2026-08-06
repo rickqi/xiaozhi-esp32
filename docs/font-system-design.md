@@ -282,13 +282,52 @@ UTF-8 文本 → LVGL lv_text 解码 → Unicode 码点
 | 字形 RAM | **0** | **0**（mmap 直读） |
 | 元数据 RAM | 0（const） | ~几百字节（lv_malloc） |
 | 访问 | const 指针 | 指向 mmap flash 区 |
-| 缓存 | LVGL 内部字形缓存 | 同左 |
+| 字形缓存 | **无**（LVGL 9 SW 路径无字形缓存） | 同左 |
 | 全量字库代价 | 固件 +1.7~15MB | **固件 0 成本**，占 assets 分区 |
 
-**本板（waveshare-s3-rlcd-4.2，16MB flash）**：
-- 内置 `font_puhui_basic_14_1`：217KB（单色屏 1bpp 足够，4bpp 抗锯齿浪费）
-- assets 分区 6.63MB：可容纳 `font_puhui_common_14_1.bin` 全量
+**本板（waveshare-s3-rlcd-4.2，16MB flash）实测规格**：
+- 内置 `font_puhui_basic_30_4`：约 1.3MB 源码（单色屏 4bpp 规格，30px）
+- 版本弹窗另用 `font_puhui_basic_14_1`（14px，板文件 extern 引用）
+- assets 分区 6.63MB，已含 `font_puhui_common_30_4.bin`（全量 18000+ 字，约 2.5MB）
 - 显示缓冲在 PSRAM，**字体数据永不进 RAM**
+
+### 8.1 字形渲染的真实 RAM 模型（LVGL 9.3.0）
+
+> **关键事实：LVGL 9 软件渲染路径没有字形位图缓存。**
+> v8 的 per-font 字形缓存（`lv_font_fmt_txt_glyph_cache_t`）已在 v9 移除（`#if LVGL_VERSION_MAJOR == 8` 废弃代码）。
+> 全局 `lv_cache_t`（`LV_CACHE_DEF_SIZE`）只服务图片解码 / vg_lite 硬件加速 / freetype / tiny_ttf——**不用于软件 fmt_txt 字体**。
+
+软件渲染路径（`lv_draw_label.c`）逐字渲染进**单个可复用暂存缓冲**，draw pass 结束释放：
+
+```
+字形 → lv_font_get_glyph_dsc（解析 fallback 链）
+     → lv_draw_buf_reshape/创建暂存缓冲（A8 格式，宽=字形宽对齐，高=向上取整到 32 的倍数）
+     → lv_font_get_glyph_bitmap 渲染进暂存缓冲
+     → draw pass 结束 lv_draw_buf_destroy 释放
+```
+
+**每字形 RAM ≈ `stride_A8(box_w) × round_up(box_h, 32)`**
+
+| 场景 | 峰值 RAM | 说明 |
+|---|---|---|
+| 30px 中文（普通路径） | **~1 KB**（A8 暂存，30×30 → 32×32） | 复用，整行只花最大字形的大小 |
+| 零拷贝 cbin（raw 路径） | **~0** | 直接返回 mmap 指针，不写暂存缓冲 |
+| 整行 20 字中文 | ~1 KB（非 20 KB） | 单缓冲复用，与行长无关 |
+| **fallback 链** | **+0** | 无缓存可翻倍；每字形解析到唯一字体（`lv_font.c:109-123`） |
+
+### 8.2 方案演进内存对比（现有 vs 完整 v3.7.0）
+
+| 项 | 现有方案（v3.7.0 前） | 完整方案（v3.7.0） | 差异 |
+|---|---|---|---|
+| 内置字体 flash | basic_30_4 ≈ 1.3MB | 同左 | **0** |
+| 全量字体 | assets common_30_4 ≈ 2.5MB | 同左 | **0** |
+| 字体元数据 RAM | ~几百字节 | +fallback 指针（复用字段） | **+0** |
+| 字形渲染 RAM | ~0-1KB 暂存 | 同左 | **0** |
+| fallback 缓存 | — | 无缓存可翻倍 | **+0** |
+| 图标覆盖（可选） | 不可用 | 每字体 +几百字节 | **+0~几百字节** |
+| placeholder | 关 | 开（绘制逻辑） | **+0 RAM** |
+
+**结论：v3.7.0 完整方案相对现有方案内存中立（+0~几百字节可选）**——因 LVGL 9 无字形缓存、fallback 字段复用、零拷贝延续。三个决定性原因：① 无字形缓存 → fallback 无翻倍问题；② fallback 指针复用已有结构体字段；③ 全量字体字形仍 flash 直读。
 
 ---
 
