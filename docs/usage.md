@@ -136,6 +136,7 @@ idf.py -p $env:XIAOZHI_PORT flash
 | `self.get_ble_keyboard_status` | — | 查询蓝牙键盘连接状态（已连接/未连接/扫描中，含键盘名） |
 | `self.get_ble_keyboard_shortcuts` | — | 播报蓝牙键盘快捷键说明（Enter/Esc/Space/方向键/R/T/M/V/Tab/数字键 1-9） |
 | `self.get_voice_commands` | — | 按分类播报全部可用语音命令（蓝牙键盘/环境/录音/音乐/对话日志/系统管理） |
+| `self.get_mcp_help` | `tool_name`(可选) | MCP 工具帮助：不填=全部工具概览；填工具名=该工具详细用法 |
 
 **对话示例**：
 - "现在室温多少度？" → `self.get_temperature_humidity`
@@ -153,6 +154,7 @@ idf.py -p $env:XIAOZHI_PORT flash
 - "键盘连上了吗？" / "查询键盘状态" → `self.get_ble_keyboard_status`
 - "键盘有哪些快捷键？" → `self.get_ble_keyboard_shortcuts`
 - "有哪些语音命令？" / "你能做什么？" → `self.get_voice_commands`（按分类介绍全部语音指令）
+- "帮助" / "这个工具怎么用？" → `self.get_mcp_help`（不填参数=全部工具概览；填工具名=单个工具详细用法）
 - "只听小智的声音" → `self.play_chatlog_audio(..., channel="ai")`
 - "删掉那条对话" → `self.delete_chatlog("chat_...txt")`
 - "下载日志" / "导出文件" → `self.start_file_server`（返回 URL，浏览器打开即可下载）

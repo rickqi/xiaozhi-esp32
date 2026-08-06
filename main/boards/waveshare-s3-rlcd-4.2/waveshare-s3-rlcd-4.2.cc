@@ -2223,6 +2223,29 @@ private:
                     "说“重新配网”，进入 WiFi 配网模式。");
             });
 
+        // MCP usage help (voice queryable): detailed help for one tool or an
+        // overview of ALL registered tools (framework + board custom).
+        mcp_server.AddTool("self.get_mcp_help",
+            "Get usage help for MCP tools (voice commands) on this device.\n"
+            "Optional parameter tool_name: if provided, returns detailed usage "
+            "for that specific tool (description + parameters); if omitted, "
+            "returns an overview of ALL registered MCP tools, including framework "
+            "common tools and board custom tools.\n"
+            "Use this when the user asks for help on a command, how to use a tool, "
+            "or wants to see the full MCP tool list (e.g. \"帮助\", \"这个工具怎么用\", "
+            "\"帮助我了解语音命令\", \"get_ble_keyboard_status 怎么用\", \"扫描键盘工具怎么用\").",
+            PropertyList({
+                Property("tool_name", kPropertyTypeString, std::string(""))
+            }),
+            [](const PropertyList& properties) -> ReturnValue {
+                std::string name = properties["tool_name"].value<std::string>();
+                auto& mcp = McpServer::GetInstance();
+                if (name.empty()) {
+                    return mcp.GetAllToolsHelp();
+                }
+                return mcp.GetToolHelp(name);
+            });
+
         // BLE keyboard hotkey reference (voice queryable)
         mcp_server.AddTool("self.get_ble_keyboard_shortcuts",
             "List all Bluetooth keyboard shortcut keys and their actions supported by this device.\n"

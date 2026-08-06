@@ -300,6 +300,43 @@ void McpServer::AddUserOnlyTools() {
     }
 }
 
+std::string McpServer::GetToolHelp(const std::string& tool_name) const {
+    for (auto* tool : tools_) {
+        if (tool->name() == tool_name) {
+            std::string help = "工具 " + tool->name() + " 的使用说明：\n" + tool->description();
+            const auto& props = tool->properties();
+            if (props.begin() != props.end()) {
+                help += "\n参数：";
+                for (const auto& p : props) {
+                    help += "\n- " + p.name();
+                    help += p.has_default_value() ? "（可选）" : "（必填）";
+                }
+            }
+            help += "\n如需了解其它工具，请说“帮助 加上工具名”。";
+            return help;
+        }
+    }
+    return "未找到工具 " + tool_name +
+           "。可用工具请说“有哪些语音命令”或“帮助”查看全部。";
+}
+
+std::string McpServer::GetAllToolsHelp() const {
+    std::string help = "本设备共注册 " + std::to_string(tools_.size()) + " 个 MCP 工具（含框架通用与板级自定义）：";
+    for (auto* tool : tools_) {
+        if (tool->user_only()) {
+            continue;  // 用户专属工具对 AI 不可见，不列出
+        }
+        std::string desc = tool->description();
+        auto nl = desc.find('\n');
+        if (nl != std::string::npos) {
+            desc = desc.substr(0, nl);
+        }
+        help += "\n- " + tool->name() + "：" + desc;
+    }
+    help += "\n想了解某个工具的详细用法，请说“帮助”，后跟工具名，例如“帮助 scan_ble”。";
+    return help;
+}
+
 void McpServer::AddTool(McpTool* tool) {
     // Prevent adding duplicate tools
     if (std::find_if(tools_.begin(), tools_.end(), [tool](const McpTool* t) { return t->name() == tool->name(); }) != tools_.end()) {

@@ -177,6 +177,8 @@ public:
 
     auto begin() { return properties_.begin(); }
     auto end() { return properties_.end(); }
+    auto begin() const { return properties_.begin(); }
+    auto end() const { return properties_.end(); }
 
     std::vector<std::string> GetRequired() const {
         std::vector<std::string> required;
@@ -323,6 +325,12 @@ public:
     void AddTool(McpTool* tool);
     void AddTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
     void AddUserOnlyTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback);
+
+    /// Help for a single registered tool: name, full description (incl. args)
+    /// and whether each parameter is required. Empty tool_name -> overview of
+    /// ALL tools. Used by the self.get_mcp_help voice tool.
+    std::string GetToolHelp(const std::string& tool_name) const;
+    std::string GetAllToolsHelp() const;
     void ParseMessage(const cJSON* json);
     void ParseMessage(const std::string& message);
 
