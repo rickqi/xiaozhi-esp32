@@ -2,8 +2,12 @@
 #include "esp_lvgl_port.h"
 #include <cstring>
 
+LV_FONT_DECLARE(font_puhui_basic_20_4);
+LV_IMG_DECLARE(esp_brookesia_image_large_app_launcher_default_112_112);
+
 XiaoZhiApp::XiaoZhiApp()
-    : esp_brookesia::systems::phone::App("XiaoZhi", nullptr, true, true, false) {}
+    : esp_brookesia::systems::phone::App(
+          "小智", &esp_brookesia_image_large_app_launcher_default_112_112, true, true, false) {}
 
 bool XiaoZhiApp::run() {
     lv_obj_t* screen = lv_scr_act();
@@ -29,6 +33,7 @@ bool XiaoZhiApp::run() {
     lv_obj_add_flag(emotion_image_, LV_OBJ_FLAG_HIDDEN);
 
     emotion_label_ = lv_label_create(emotion_container_);
+    lv_obj_set_style_text_font(emotion_label_, &font_puhui_basic_20_4, 0);
     lv_obj_set_style_text_color(emotion_label_, lv_color_hex(0x00CED1), 0);
     lv_obj_set_style_text_align(emotion_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(emotion_label_, LV_SYMBOL_AUDIO);
@@ -46,12 +51,14 @@ bool XiaoZhiApp::run() {
     lv_obj_set_width(status_label_, LV_PCT(100));
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(status_label_, "");
+    lv_obj_set_style_text_font(status_label_, &font_puhui_basic_20_4, 0);
     lv_obj_set_style_text_color(status_label_, lv_color_hex(0x888888), 0);
 
     notification_label_ = lv_label_create(screen);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_bg_color(notification_label_, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(notification_label_, LV_OPA_80, 0);
+    lv_obj_set_style_text_font(notification_label_, &font_puhui_basic_20_4, 0);
     lv_obj_set_style_text_color(notification_label_, lv_color_white(), 0);
     lv_obj_set_style_pad_all(notification_label_, 10, 0);
     lv_obj_set_style_radius(notification_label_, 8, 0);
@@ -100,6 +107,7 @@ void XiaoZhiApp::AppendChatBubble(const char* role, const char* content) {
     lv_obj_t* label = lv_label_create(bubble);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_font(label, &font_puhui_basic_20_4, 0);
     lv_obj_set_style_text_color(label, lv_color_white(), 0);
     lv_label_set_text(label, content);
 

@@ -216,10 +216,10 @@ private:
 
         lv_init();
         lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-        port_cfg.task_priority = 4;
+        port_cfg.task_priority = 1;
         port_cfg.task_affinity = 1;
         port_cfg.task_stack = 16 * 1024;
-        port_cfg.timer_period_ms = 30;
+        port_cfg.timer_period_ms = 500;
         ESP_ERROR_CHECK(lvgl_port_init(&port_cfg));
 
         lvgl_port_display_cfg_t disp_cfg = {};
@@ -230,11 +230,10 @@ private:
         disp_cfg.hres = DISPLAY_WIDTH;
         disp_cfg.vres = DISPLAY_HEIGHT;
         disp_cfg.color_format = LV_COLOR_FORMAT_RGB565;
-        disp_cfg.flags.buff_dma = 0;
-        disp_cfg.flags.buff_spiram = 1;
-        disp_cfg.flags.sw_rotate = 1;
+        disp_cfg.flags.buff_dma = 1;
+        disp_cfg.flags.buff_spiram = 0;
+        disp_cfg.flags.sw_rotate = 0;
         disp_cfg.flags.swap_bytes = 1;
-        disp_cfg.rounder_cb = rounder_cb;
 
         lv_disp_ = lvgl_port_add_disp(&disp_cfg);
         panel_io_ = panel_io;
