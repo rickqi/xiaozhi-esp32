@@ -1,5 +1,5 @@
 #include "wifi_board.h"
-#include "display/lcd_display.h"
+#include "display/brookesia_display/brookesia_display.h"
 #include "esp_lcd_sh8601.h"
 
 #include "codecs/box_audio_codec.h"
@@ -11,6 +11,7 @@
 #include "power_save_timer.h"
 #include "axp2101.h"
 #include "i2c_device.h"
+#include "backlight.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -22,11 +23,15 @@
 #include <esp_lvgl_port.h>
 #include <lvgl.h>
 
-// Phase 2: Brookesia variant of the AMOLED 2.06 board.
-// Phase 3 will replace CustomLcdDisplay with BrookesiaDisplay.
-
 #define TAG "BrookesiaAmoled2inch06"
 #define LCD_OPCODE_WRITE_CMD (0x02ULL)
+
+static void rounder_cb(lv_area_t* area) {
+    area->x1 = (area->x1 >> 1) << 1;
+    area->y1 = (area->y1 >> 1) << 1;
+    area->x2 = ((area->x2 >> 1) << 1) + 1;
+    area->y2 = ((area->y2 >> 1) << 1) + 1;
+}
 
 class Pmic : public Axp2101 {
 public:
@@ -61,32 +66,6 @@ static const sh8601_lcd_init_cmd_t vendor_specific_init[] = {
     {0x51, (uint8_t []){0xFF}, 1, 0},
 };
 
-class CustomLcdDisplay : public SpiLcdDisplay {
-public:
-    static void rounder_event_cb(lv_event_t* e) {
-        lv_area_t* area = (lv_area_t* )lv_event_get_param(e);
-        area->x1 = (area->x1 >> 1) << 1;
-        area->y1 = (area->y1 >> 1) << 1;
-        area->x2 = ((area->x2 >> 1) << 1) + 1;
-        area->y2 = ((area->y2 >> 1) << 1) + 1;
-    }
-
-    CustomLcdDisplay(esp_lcd_panel_io_handle_t io_handle,
-                     esp_lcd_panel_handle_t panel_handle,
-                     int width, int height,
-                     int offset_x, int offset_y,
-                     bool mirror_x, bool mirror_y, bool swap_xy)
-        : SpiLcdDisplay(io_handle, panel_handle,
-                        width, height, offset_x, offset_y,
-                        mirror_x, mirror_y, swap_xy) {
-        DisplayLockGuard lock(this);
-        lv_obj_set_style_pad_left(status_bar_, LV_HOR_RES * 0.1, 0);
-        lv_obj_set_style_pad_right(status_bar_, LV_HOR_RES * 0.1, 0);
-        lv_display_add_event_cb(display_, rounder_event_cb,
-                                 LV_EVENT_INVALIDATE_AREA, NULL);
-    }
-};
-
 class CustomBacklight : public Backlight {
 public:
     CustomBacklight(esp_lcd_panel_io_handle_t panel_io)
@@ -94,8 +73,6 @@ public:
 protected:
     esp_lcd_panel_io_handle_t panel_io_;
     virtual void SetBrightnessImpl(uint8_t brightness) override {
-        auto display = Board::GetInstance().GetDisplay();
-        DisplayLockGuard lock(display);
         uint8_t data[1] = {(uint8_t)((255 * brightness) / 100)};
         int lcd_cmd = 0x51;
         lcd_cmd &= 0xff;
@@ -110,7 +87,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_;
     Pmic* pmic_ = nullptr;
     Button boot_button_;
-    CustomLcdDisplay* display_;
+    BrookesiaDisplay* display_;
     CustomBacklight* backlight_;
     PowerSaveTimer* power_save_timer_;
 
@@ -205,12 +182,31 @@ private:
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
 
-        // Phase 2: temporary CustomLcdDisplay (will be replaced by BrookesiaDisplay in Phase 3)
-        display_ = new CustomLcdDisplay(panel_io, panel,
-                                        DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                        DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-                                        DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y,
-                                        DISPLAY_SWAP_XY);
+        lv_init();
+        lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+        port_cfg.task_priority = 4;
+        port_cfg.task_affinity = 1;
+        ESP_ERROR_CHECK(lvgl_port_init(&port_cfg));
+
+        lvgl_port_display_cfg_t disp_cfg = {};
+        disp_cfg.io_handle = panel_io;
+        disp_cfg.panel_handle = panel;
+        disp_cfg.buffer_size = DISPLAY_WIDTH * 20;
+        disp_cfg.double_buffer = false;
+        disp_cfg.hres = DISPLAY_WIDTH;
+        disp_cfg.vres = DISPLAY_HEIGHT;
+        disp_cfg.color_format = LV_COLOR_FORMAT_RGB565;
+        disp_cfg.flags.buff_spiram = 1;
+        disp_cfg.flags.sw_rotate = 1;
+        disp_cfg.flags.swap_bytes = 1;
+        disp_cfg.rounder_cb = rounder_cb;
+
+        lv_display_t* lv_disp = lvgl_port_add_disp(&disp_cfg);
+        assert(lv_disp);
+
+        display_ = new BrookesiaDisplay(lv_disp, panel_io,
+                                        DISPLAY_WIDTH, DISPLAY_HEIGHT);
+
         backlight_ = new CustomBacklight(panel_io);
         backlight_->RestoreBrightness();
     }
@@ -229,14 +225,13 @@ private:
         esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
         tp_io_config.scl_speed_hz = 400 * 1000;
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle));
-        ESP_LOGI(TAG, "Initialize touch controller");
+        ESP_LOGI(TAG, "Init touch FT5x06");
         ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_ft5x06(tp_io_handle, &tp_cfg, &tp));
         const lvgl_port_touch_cfg_t touch_cfg = {
             .disp = lv_display_get_default(),
             .handle = tp,
         };
         lvgl_port_add_touch(&touch_cfg);
-        ESP_LOGI(TAG, "Touch panel initialized");
     }
 
     void InitializeTools() {
@@ -248,7 +243,6 @@ private:
                 EnterWifiConfigMode();
                 return true;
             });
-        // Phase 5 will add migrated MCP tools from waveshare-s3-rlcd-4.2
     }
 
 public:
