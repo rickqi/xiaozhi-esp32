@@ -96,6 +96,11 @@ void BrookesiaDisplay::CreatePhoneShell() {
     int app_id = phone_->installApp(*xiaozhi_app_);
     ESP_LOGI(TAG, "App installed id=%d", app_id);
 
+    // FluidBoxApp installation temporarily disabled for debugging
+    // auto* fluidbox_app = new FluidBoxApp();
+    // int fluid_id = phone_->installApp(*fluidbox_app);
+    // ESP_LOGI(TAG, "FluidBox app installed id=%d", fluid_id);
+
     lv_timer_create([](lv_timer_t* t) {
         auto* self = static_cast<BrookesiaDisplay*>(t->user_data);
         self->UpdateClock();

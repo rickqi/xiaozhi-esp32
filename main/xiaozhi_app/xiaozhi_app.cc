@@ -56,14 +56,14 @@ bool XiaoZhiApp::run() {
     lv_obj_set_width(status_label_, LV_PCT(100));
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(status_label_, "");
-    lv_obj_set_style_text_font(status_label_, &font_puhui_basic_20_4, 0);
+    lv_obj_set_style_text_font(status_label_, &font_puhui_basic_30_4, 0);
     lv_obj_set_style_text_color(status_label_, lv_color_hex(0x888888), 0);
 
     notification_label_ = lv_label_create(screen);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_bg_color(notification_label_, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(notification_label_, LV_OPA_80, 0);
-    lv_obj_set_style_text_font(notification_label_, &font_puhui_basic_20_4, 0);
+    lv_obj_set_style_text_font(notification_label_, &font_puhui_basic_30_4, 0);
     lv_obj_set_style_text_color(notification_label_, lv_color_white(), 0);
     lv_obj_set_style_pad_all(notification_label_, 10, 0);
     lv_obj_set_style_radius(notification_label_, 8, 0);
@@ -112,7 +112,7 @@ void XiaoZhiApp::AppendChatBubble(const char* role, const char* content) {
     lv_obj_t* label = lv_label_create(bubble);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, LV_PCT(100));
-    lv_obj_set_style_text_font(label, &font_puhui_basic_20_4, 0);
+    lv_obj_set_style_text_font(label, &font_puhui_basic_30_4, 0);
     lv_obj_set_style_text_color(label, lv_color_white(), 0);
     lv_label_set_text(label, content);
 

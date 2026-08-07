@@ -113,6 +113,7 @@ private:
     PowerSaveTimer* power_save_timer_;
     lv_display_t* lv_disp_ = nullptr;
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
+    esp_lcd_panel_handle_t panel_ = nullptr;
 
 #if CONFIG_USE_BLE_HID_KEYBOARD
     BluetoothKeyboard bt_keyboard_;
@@ -247,7 +248,7 @@ private:
         port_cfg.task_priority = 1;
         port_cfg.task_affinity = 1;
         port_cfg.task_stack = 16 * 1024;
-        port_cfg.timer_period_ms = 100;
+        port_cfg.timer_period_ms = 500;
         ESP_ERROR_CHECK(lvgl_port_init(&port_cfg));
 
         lvgl_port_display_cfg_t disp_cfg = {};
@@ -258,13 +259,14 @@ private:
         disp_cfg.hres = DISPLAY_WIDTH;
         disp_cfg.vres = DISPLAY_HEIGHT;
         disp_cfg.color_format = LV_COLOR_FORMAT_RGB565;
-        disp_cfg.flags.buff_dma = 0;
-        disp_cfg.flags.buff_spiram = 1;
+        disp_cfg.flags.buff_dma = 1;
+        disp_cfg.flags.buff_spiram = 0;
         disp_cfg.flags.sw_rotate = 0;
         disp_cfg.flags.swap_bytes = 1;
 
         lv_disp_ = lvgl_port_add_disp(&disp_cfg);
         panel_io_ = panel_io;
+        panel_ = panel;
         assert(lv_disp_);
     }
 
@@ -1379,66 +1381,7 @@ private:
                 auto& srv = HttpFileServer::GetInstance();
                 if (srv.IsRunning()) { srv.Stop(); return std::string("Stopped"); }
                 return std::string("Was not running");
-            });
-
-        mcp.AddTool("self.list_recordings",
-            "List voice recordings saved on the SD card (/sdcard/records/).",
-            PropertyList(), [](const PropertyList&) -> ReturnValue {
-                cJSON* root = cJSON_CreateArray();
-                DIR* dir = opendir("/sdcard/records");
-                if (!dir) return root;
-                struct dirent* ent;
-                while ((ent = readdir(dir)) != nullptr) {
-                    if (strstr(ent->d_name, ".wav") == nullptr) continue;
-                    cJSON* item = cJSON_CreateObject();
-                    cJSON_AddStringToObject(item, "filename", ent->d_name);
-                    std::string path = "/sdcard/records/" + std::string(ent->d_name);
-                    struct stat st;
-                    if (stat(path.c_str(), &st) == 0) {
-                        cJSON_AddNumberToObject(item, "size", st.st_size);
-                    }
-                    cJSON_AddItemToArray(root, item);
-                }
-                closedir(dir);
-                return root;
-            });
-
-        mcp.AddTool("self.list_music",
-            "List music files on the SD card (/sdcard/music/).",
-            PropertyList(), [](const PropertyList&) -> ReturnValue {
-                cJSON* root = cJSON_CreateArray();
-                DIR* dir = opendir("/sdcard/music");
-                if (!dir) return root;
-                struct dirent* ent;
-                while ((ent = readdir(dir)) != nullptr) {
-                    if (strstr(ent->d_name, ".mp3") == nullptr &&
-                        strstr(ent->d_name, ".wav") == nullptr) continue;
-                    cJSON_AddItemToArray(root, cJSON_CreateString(ent->d_name));
-                }
-                closedir(dir);
-                return root;
-            });
-
-        mcp.AddTool("self.list_chatlogs",
-            "List chat conversation logs on the SD card.",
-            PropertyList({
-                Property("directory", kPropertyTypeString, std::string("chatlogs"))
-            }),
-            [](const PropertyList& props) -> ReturnValue {
-                std::string dir_param = props["directory"].value<std::string>();
-                std::string path = (dir_param == "system_logs" || dir_param == "logs")
-                    ? "/sdcard/logs" : "/sdcard/logs/chatlogs";
-                cJSON* root = cJSON_CreateArray();
-                DIR* dir = opendir(path.c_str());
-                if (!dir) return root;
-                struct dirent* ent;
-                while ((ent = readdir(dir)) != nullptr) {
-                    if (ent->d_name[0] == '.') continue;
-                    cJSON_AddItemToArray(root, cJSON_CreateString(ent->d_name));
-                }
-                closedir(dir);
-                return root;
-            });
+             });
 
         mcp.AddTool("self.get_battery_level",
             "Query the current battery level in percent and charging status.\n"
