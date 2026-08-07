@@ -18,10 +18,13 @@ public:
     void ShowNotification(const char* msg, int duration_ms);
 
 private:
+    lv_obj_t* emotion_container_ = nullptr;
+    lv_obj_t* emotion_image_ = nullptr;
     lv_obj_t* emotion_label_ = nullptr;
     lv_obj_t* chat_container_ = nullptr;
     lv_obj_t* status_label_ = nullptr;
     lv_obj_t* notification_label_ = nullptr;
+    lv_obj_t* listening_dots_ = nullptr;
     lv_timer_t* notification_timer_ = nullptr;
 
     std::string pending_status_;

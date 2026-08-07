@@ -4,12 +4,41 @@
 #include "esp_lvgl_port.h"
 #include <esp_log.h>
 #include <time.h>
+#include "display/lvgl_display/lvgl_theme.h"
+#include "display/lvgl_display/emoji_collection.h"
+#include "display/lvgl_display/lvgl_font.h"
+#include <font_awesome.h>
+
+LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
+LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 
 #include "stylesheet/stylesheet.hpp"
 
 #define TAG "BrookesiaDisplay"
 
 using namespace esp_brookesia::systems::phone;
+
+static void InitBrookesiaThemes() {
+    auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
+    auto icon_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_ICON_FONT);
+
+    auto dark_theme = new LvglTheme("dark");
+    dark_theme->set_background_color(lv_color_hex(0x1A1A2E));
+    dark_theme->set_text_color(lv_color_hex(0xE0E0E0));
+    dark_theme->set_chat_background_color(lv_color_hex(0x16213E));
+    dark_theme->set_user_bubble_color(lv_color_hex(0x2196F3));
+    dark_theme->set_assistant_bubble_color(lv_color_hex(0x4CAF50));
+    dark_theme->set_system_bubble_color(lv_color_hex(0x607D8B));
+    dark_theme->set_system_text_color(lv_color_hex(0xFFFFFF));
+    dark_theme->set_border_color(lv_color_hex(0x333333));
+    dark_theme->set_low_battery_color(lv_color_hex(0xFF6B6B));
+    dark_theme->set_text_font(text_font);
+    dark_theme->set_icon_font(icon_font);
+    dark_theme->set_large_icon_font(icon_font);
+    dark_theme->set_emoji_collection(std::make_shared<Twemoji64>());
+
+    LvglThemeManager::GetInstance().RegisterTheme("dark", dark_theme);
+}
 
 BrookesiaDisplay::BrookesiaDisplay(lv_display_t* lv_disp,
                                     esp_lcd_panel_io_handle_t panel_io,
@@ -18,6 +47,9 @@ BrookesiaDisplay::BrookesiaDisplay(lv_display_t* lv_disp,
     display_ = lv_disp;
     width_ = width;
     height_ = height;
+
+    InitBrookesiaThemes();
+    current_theme_ = LvglThemeManager::GetInstance().GetTheme("dark");
 
     esp_brookesia::gui::LvLock::registerCallbacks(
         [](int timeout_ms) -> bool {
@@ -92,10 +124,20 @@ void BrookesiaDisplay::SetChatMessage(const char* role, const char* content) {
 }
 
 void BrookesiaDisplay::SetEmotion(const char* emotion) {
-    if (xiaozhi_app_) {
-        DisplayLockGuard lock(this);
-        xiaozhi_app_->SetEmotionText(emotion);
+    if (!xiaozhi_app_) return;
+    DisplayLockGuard lock(this);
+
+    auto* theme = dynamic_cast<LvglTheme*>(current_theme_);
+    if (theme && theme->emoji_collection()) {
+        auto* img = theme->emoji_collection()->GetEmojiImage(emotion);
+        if (img && img->image_dsc()) {
+            xiaozhi_app_->SetEmotionImage(img->image_dsc());
+            return;
+        }
     }
+
+    const char* icon = font_awesome_get_utf8(emotion);
+    xiaozhi_app_->SetEmotionText(icon ? icon : LV_SYMBOL_AUDIO);
 }
 
 void BrookesiaDisplay::ShowNotification(const char* notification, int duration_ms) {

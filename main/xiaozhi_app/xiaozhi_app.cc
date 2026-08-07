@@ -16,12 +16,22 @@ bool XiaoZhiApp::run() {
     lv_obj_set_style_border_width(container, 0, 0);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
 
-    emotion_label_ = lv_label_create(container);
-    lv_obj_set_height(emotion_label_, LV_SIZE_CONTENT);
+    emotion_container_ = lv_obj_create(container);
+    lv_obj_set_height(emotion_container_, LV_SIZE_CONTENT);
+    lv_obj_set_width(emotion_container_, LV_PCT(100));
+    lv_obj_set_flex_align(emotion_container_, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_opa(emotion_container_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(emotion_container_, 0, 0);
+    lv_obj_clear_flag(emotion_container_, LV_OBJ_FLAG_SCROLLABLE);
+
+    emotion_image_ = lv_image_create(emotion_container_);
+    lv_obj_add_flag(emotion_image_, LV_OBJ_FLAG_HIDDEN);
+
+    emotion_label_ = lv_label_create(emotion_container_);
     lv_obj_set_style_text_color(emotion_label_, lv_color_hex(0x00CED1), 0);
     lv_obj_set_style_text_align(emotion_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(emotion_label_, LV_SYMBOL_AUDIO);
-    lv_obj_set_width(emotion_label_, LV_PCT(100));
 
     chat_container_ = lv_obj_create(container);
     lv_obj_set_flex_grow(chat_container_, 1);
@@ -102,17 +112,17 @@ void XiaoZhiApp::AppendChatBubble(const char* role, const char* content) {
 }
 
 void XiaoZhiApp::SetEmotionImage(const void* src) {
-    if (emotion_label_ == nullptr) {
-        pending_status_ = "emotion_img";
-        return;
-    }
-    lv_obj_add_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+    if (emotion_image_ == nullptr) return;
+    lv_image_set_src(emotion_image_, src);
+    lv_obj_clear_flag(emotion_image_, LV_OBJ_FLAG_HIDDEN);
+    if (emotion_label_) lv_obj_add_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void XiaoZhiApp::SetEmotionText(const char* text) {
     if (emotion_label_ == nullptr) return;
     lv_label_set_text(emotion_label_, text ? text : LV_SYMBOL_AUDIO);
     lv_obj_clear_flag(emotion_label_, LV_OBJ_FLAG_HIDDEN);
+    if (emotion_image_) lv_obj_add_flag(emotion_image_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void XiaoZhiApp::SetStatus(const char* status) {
