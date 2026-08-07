@@ -143,10 +143,13 @@ void BrookesiaDisplay::SetStatus(const char* status) {
 }
 
 void BrookesiaDisplay::SetChatMessage(const char* role, const char* content) {
+    ESP_LOGI(TAG, "SetChatMessage: '%s' acquiring lock", role ? role : "null");
     if (xiaozhi_app_) {
         DisplayLockGuard lock(this);
+        ESP_LOGI(TAG, "SetChatMessage: lock acquired");
         xiaozhi_app_->SetChatMessage(role, content);
     }
+    ESP_LOGI(TAG, "SetChatMessage: done");
 }
 
 void BrookesiaDisplay::SetEmotion(const char* emotion) {
