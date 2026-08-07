@@ -189,7 +189,14 @@ void sim_init(void)
     s_view_pool = (sim_particle_view_t*)heap_caps_malloc(
         2 * PARTICLE_MAX * sizeof(sim_particle_view_t), MALLOC_CAP_SPIRAM);
 
-    ESP_LOGI(TAG, "fluid arrays allocated in PSRAM");
+    if (s_pool == NULL || s_density == NULL || s_density_near == NULL ||
+        s_visc_delta == NULL || s_press == NULL || s_cell_of == NULL ||
+        s_order == NULL || s_cell_start == NULL || s_pair == NULL ||
+        s_pair_off == NULL || s_cursor == NULL || s_view_pool == NULL) {
+        ESP_LOGE(TAG, "PSRAM alloc FAILED (free=%u)", (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    } else {
+        ESP_LOGI(TAG, "fluid arrays allocated in PSRAM (free=%u)", (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    }
     s_p = &s_pool[0];
     s_alt = &s_pool[1];
     s_view_work = &s_view_pool[0];

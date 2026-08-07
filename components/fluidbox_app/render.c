@@ -6,6 +6,7 @@
 #include "config.h"
 #include "fb_display.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 
 // The panel takes RGB565 with the bytes the other way round from how the CPU
 // stores a uint16, so every colour is byte swapped once, up front.
@@ -28,6 +29,8 @@ static bool s_band_used[BAND_COUNT];
 static bool s_band_used_prev[BAND_COUNT];
 
 // Projected particles for the current frame.
+static const char *TAG = "fluidbox_render";
+
 static sim_particle_view_t *s_snapshot;  // PSRAM
 static int16_t *s_sx;   // PSRAM
 static int16_t *s_sy;   // PSRAM
@@ -142,6 +145,10 @@ void render_init(void)
     s_sc = (uint16_t*)heap_caps_malloc(PARTICLE_MAX * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
     s_sh = (uint16_t*)heap_caps_malloc(PARTICLE_MAX * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
 
+    if (s_color_lut == NULL || s_highlight_lut == NULL || s_snapshot == NULL ||
+        s_sx == NULL || s_sy == NULL || s_sr == NULL || s_sc == NULL || s_sh == NULL) {
+        ESP_LOGE(TAG, "render PSRAM alloc FAILED");
+    }
     build_color_lut();
     build_disc_spans();
 

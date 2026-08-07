@@ -1,10 +1,10 @@
 idf_component_register(
     SRCS
         "fluidbox_app.cc"
+        "fb_display.c"
         "sim.c"
         "render.c"
         "imu.c"
-        "fb_display.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_lvgl_port

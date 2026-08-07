@@ -1,15 +1,15 @@
 #include "fb_display.h"
 
 #include "config.h"
-#include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_lcd_panel_ops.h"
 
 #define BAND_PIXELS (LCD_H_RES * BAND_ROWS)
 
 static const char *TAG = "fluidbox_disp";
 
-static DMA_ATTR uint16_t s_band_buf[BAND_PIXELS];
+static uint16_t *s_band_buf;   // DMA pool, allocated lazily
 static esp_lcd_panel_handle_t s_panel;
 
 esp_err_t fb_panel_set_handle(esp_lcd_panel_handle_t panel)
@@ -18,6 +18,13 @@ esp_err_t fb_panel_set_handle(esp_lcd_panel_handle_t panel)
         return ESP_ERR_INVALID_ARG;
     }
     s_panel = panel;
+    if (s_band_buf == NULL) {
+        s_band_buf = (uint16_t*)heap_caps_malloc(BAND_PIXELS * sizeof(uint16_t), MALLOC_CAP_DMA);
+        if (s_band_buf == NULL) {
+            ESP_LOGE(TAG, "band buffer alloc failed");
+            return ESP_ERR_NO_MEM;
+        }
+    }
     return ESP_OK;
 }
 

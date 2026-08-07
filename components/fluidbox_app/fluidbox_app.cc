@@ -62,9 +62,11 @@ static void render_task_func(void* arg)
     vTaskDelete(NULL);
 }
 
+LV_IMG_DECLARE(esp_brookesia_image_large_app_launcher_default_112_112);
+
 FluidBoxApp::FluidBoxApp()
     : esp_brookesia::systems::phone::App(
-          "FluidBox", nullptr, false, true, false) {}
+          "FluidBox", &esp_brookesia_image_large_app_launcher_default_112_112, true, true, false) {}
 
 bool FluidBoxApp::run()
 {
