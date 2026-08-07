@@ -18,6 +18,13 @@
 #include "assets/lang_config.h"
 #include <font_awesome.h>
 
+#include <sdmmc_cmd.h>
+#include <driver/sdmmc_host.h>
+#include <esp_vfs_fat.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <cstring>
+
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
 #include <driver/i2c_master.h>
@@ -300,6 +307,33 @@ private:
     }
 #endif
 
+    void InitializeSdCard() {
+        sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+        host.flags = SDMMC_HOST_FLAG_1BIT;
+        host.slot = SDMMC_HOST_SLOT_1;
+        sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+        slot_config.clk = (gpio_num_t)SDMMC_CLK_PIN;
+        slot_config.cmd = (gpio_num_t)SDMMC_CMD_PIN;
+        slot_config.d0  = (gpio_num_t)SDMMC_D0_PIN;
+        slot_config.width = 1;
+        esp_vfs_fat_sdmmc_mount_config_t mount_config = {};
+        mount_config.format_if_mount_failed = false;
+        mount_config.max_files = 5;
+        mount_config.allocation_unit_size = 16 * 1024;
+        sdmmc_card_t* card = nullptr;
+        esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config,
+                                                  &mount_config, &card);
+        if (ret == ESP_OK) {
+            sdmmc_card_print_info(stdout, card);
+            mkdir("/sdcard/records", 0755);
+            mkdir("/sdcard/music", 0755);
+            mkdir("/sdcard/logs", 0755);
+            ESP_LOGI(TAG, "SD card mounted at /sdcard");
+        } else {
+            ESP_LOGW(TAG, "SD card mount failed: %s", esp_err_to_name(ret));
+        }
+    }
+
     void InitializeTools() {
         auto& mcp = McpServer::GetInstance();
 
@@ -390,6 +424,65 @@ private:
                 return std::string("Was not running");
             });
 
+        mcp.AddTool("self.list_recordings",
+            "List voice recordings saved on the SD card (/sdcard/records/).",
+            PropertyList(), [](const PropertyList&) -> ReturnValue {
+                cJSON* root = cJSON_CreateArray();
+                DIR* dir = opendir("/sdcard/records");
+                if (!dir) return root;
+                struct dirent* ent;
+                while ((ent = readdir(dir)) != nullptr) {
+                    if (strstr(ent->d_name, ".wav") == nullptr) continue;
+                    cJSON* item = cJSON_CreateObject();
+                    cJSON_AddStringToObject(item, "filename", ent->d_name);
+                    std::string path = "/sdcard/records/" + std::string(ent->d_name);
+                    struct stat st;
+                    if (stat(path.c_str(), &st) == 0) {
+                        cJSON_AddNumberToObject(item, "size", st.st_size);
+                    }
+                    cJSON_AddItemToArray(root, item);
+                }
+                closedir(dir);
+                return root;
+            });
+
+        mcp.AddTool("self.list_music",
+            "List music files on the SD card (/sdcard/music/).",
+            PropertyList(), [](const PropertyList&) -> ReturnValue {
+                cJSON* root = cJSON_CreateArray();
+                DIR* dir = opendir("/sdcard/music");
+                if (!dir) return root;
+                struct dirent* ent;
+                while ((ent = readdir(dir)) != nullptr) {
+                    if (strstr(ent->d_name, ".mp3") == nullptr &&
+                        strstr(ent->d_name, ".wav") == nullptr) continue;
+                    cJSON_AddItemToArray(root, cJSON_CreateString(ent->d_name));
+                }
+                closedir(dir);
+                return root;
+            });
+
+        mcp.AddTool("self.list_chatlogs",
+            "List chat conversation logs on the SD card.",
+            PropertyList({
+                Property("directory", kPropertyTypeString, std::string("chatlogs"))
+            }),
+            [](const PropertyList& props) -> ReturnValue {
+                std::string dir_param = props["directory"].value<std::string>();
+                std::string path = (dir_param == "system_logs" || dir_param == "logs")
+                    ? "/sdcard/logs" : "/sdcard/logs/chatlogs";
+                cJSON* root = cJSON_CreateArray();
+                DIR* dir = opendir(path.c_str());
+                if (!dir) return root;
+                struct dirent* ent;
+                while ((ent = readdir(dir)) != nullptr) {
+                    if (ent->d_name[0] == '.') continue;
+                    cJSON_AddItemToArray(root, cJSON_CreateString(ent->d_name));
+                }
+                closedir(dir);
+                return root;
+            });
+
 #if CONFIG_USE_BLE_HID_KEYBOARD
         mcp.AddTool("self.scan_ble",
             "Scan for BLE devices to connect a bluetooth keyboard.\n"
@@ -438,6 +531,7 @@ public:
         InitializeSH8601Display();
         InitializeTouch();
         InitializeButtons();
+        InitializeSdCard();
 #if CONFIG_USE_BLE_HID_KEYBOARD
         InitializeBleKeyboard();
 #endif
