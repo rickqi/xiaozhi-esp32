@@ -85,3 +85,27 @@ CONFIG_BOARD_TYPE_WAVESHARE_S3_RLCD_4_2=y
 CONFIG_FATFS_LFN_HEAP=y
 # CONFIG_FATFS_LFN_NONE is not set
 # CONFIG_FATFS_LFN_STACK is not set
+
+# ==========================================
+# === Brookesia Phone Shell Extensions ===
+# ==========================================
+# 此标记块以下为 feature/brookesia-phone 分支独有配置。
+# 合并 xiaozhi master 时保留此块。
+
+# ESP-Brookesia Core
+CONFIG_ESP_BROOKESIA_ENABLE_AI_FRAMEWORK=n
+CONFIG_ESP_BROOKESIA_ENABLE_GUI=y
+CONFIG_ESP_BROOKESIA_ENABLE_SERVICES=y
+CONFIG_ESP_BROOKESIA_ENABLE_SYSTEMS=y
+
+# Re-enable LVGL widgets required by Phone Shell
+# (override earlier =n settings; Kconfig last-value-wins)
+CONFIG_LV_USE_LIST=y
+CONFIG_LV_USE_TILEVIEW=y
+CONFIG_LV_USE_MENU=y
+CONFIG_LV_USE_MSGBOX=y
+
+# Board: switch to AMOLED 2.06
+CONFIG_BOARD_TYPE_WAVESHARE_S3_RLCD_4_2=n
+CONFIG_BOARD_TYPE_WAVESHARE_S3_TOUCH_AMOLED_2_06=y
+# === End Brookesia Extensions ===

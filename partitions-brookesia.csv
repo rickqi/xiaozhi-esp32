@@ -1,0 +1,12 @@
+# partitions-brookesia.csv — 16MB Flash, OTA A/B + assets
+# 用于 feature/brookesia-phone 分支的 AMOLED 2.06 手表项目
+#
+# 在 sdkconfig 中设置: CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=partitions-brookesia.csv
+#
+# Name,   Type, SubType,  Offset,   Size,    Flags
+nvs,      data, nvs,      0x9000,   0x6000,
+phy_init, data, phy,      0xf000,   0x1000,
+factory,  app,  factory,  0x10000,  1M,
+ota_0,    app,  ota_0,    ,         4M,
+ota_1,    app,  ota_1,    ,         4M,
+assets,   data, spiffs,   ,         6M,

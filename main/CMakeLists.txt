@@ -237,6 +237,12 @@ elseif(CONFIG_BOARD_TYPE_WAVESHARE_S3_TOUCH_AMOLED_2_06)
     set(BUILTIN_TEXT_FONT font_puhui_basic_30_4)
     set(BUILTIN_ICON_FONT font_awesome_30_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+elseif(CONFIG_BOARD_TYPE_WAVESHARE_S3_TOUCH_AMOLED_2_06_BROOKESIA)
+    set(BOARD_TYPE "waveshare-s3-touch-amoled-2.06")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_30_4)
+    set(BUILTIN_ICON_FONT font_awesome_30_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+    set(BROOKESIA_PHONE ON)
 elseif(CONFIG_BOARD_TYPE_WAVESHARE_C6_TOUCH_AMOLED_2_06)
     set(BOARD_TYPE "waveshare-c6-touch-amoled-2.06")
     set(BUILTIN_TEXT_FONT font_puhui_basic_30_4)
@@ -975,3 +981,23 @@ if ("${size}" AND "${offset}")
 else()
     message(STATUS "Assets partition not found, using v1 partition table")
 endif()
+
+
+# ==========================================
+# === Brookesia Phone Shell Extensions ===
+# ==========================================
+# 此标记块以下为 feature/brookesia-phone 分支独有。
+# 合并 xiaozhi master 时保留此块。
+
+if(BROOKESIA_PHONE)
+    message(STATUS "Brookesia Phone Shell: enabled")
+
+    idf_component_get_property(brookesia_lib brookesia_core COMPONENT_LIB)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE ${brookesia_lib})
+
+    target_include_directories(${COMPONENT_LIB} INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/display/brookesia_display
+        ${CMAKE_CURRENT_SOURCE_DIR}/xiaozhi_app
+    )
+endif()
+# === End Brookesia Extensions ===

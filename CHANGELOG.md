@@ -6,6 +6,39 @@
 
 ---
 
+## feature/brookesia-phone — Phase 0+1（2026-08-07）
+
+### 背景
+将 xiaozhi 语音助手移植到 ESP32-S3-Touch-AMOLED-2.06 + esp-brookesia Phone Shell。
+目标硬件：Waveshare ESP32-S3-Touch-AMOLED-2.06（410×502 AMOLED, SH8601, FT5x06 触摸, ES8311+ES7210 音频, AXP2101 PMIC）。
+
+### Phase 0：可维护性评估与更新策略
+- **Git 分支策略**：同仓库新分支 `feature/brookesia-phone`，`git merge master` 一键拉取 xiaozhi 更新
+- **代码隔离三原则**：🔒 不改（~25 文件零冲突）/ 🟡 仅追加（5 文件标记块）/ 🔴 新建（零冲突）
+- **板卡双文件法**：原始 `esp32-s3-touch-amoled-2.06.cc` 不改，新建 `-brookesia.cc` 独立编译
+- **接口检测脚本**：`scripts/check_interface_changes.sh` 自动检测 Display/Board/MCP 接口变更
+- **半自动合并脚本**：`scripts/merge_xiaozhi_update.sh` 自动解决已知冲突模式
+- **补丁清单**：`docs/brookesia-patch-list.md` 记录所有对 stock 的修改
+
+### Phase 1：项目搭建
+- **引入 brookesia_core**（vendored 0.6.0-beta2，32M，`components/brookesia_core/`）
+- **LVGL 版本升级**：~9.3.0 → 9.5.0（brookesia_core 硬性要求）
+- **esp_lvgl_port 升级**：~2.6.0 → ~2.8.0
+- **新增板卡选项**：`CONFIG_BOARD_TYPE_WAVESHARE_S3_TOUCH_AMOLED_2_06_BROOKESIA`
+- **重新启用 LVGL widgets**：LIST / TILEVIEW / MENU / MSGBOX（Phone Shell 需要）
+- **关闭 brookesia AI Framework**：`CONFIG_ESP_BROOKESIA_ENABLE_AI_FRAMEWORK=n`（用自己的 MCP）
+- **brookesia 配置块**：sdkconfig.defaults 末尾追加标记块（合并时保留）
+- **分区表**：`partitions-brookesia.csv`（16MB OTA A/B + 6MB assets）
+- **CMake 扩展块**：CMakeLists.txt 末尾追加 brookesia 组件链接（标记块）
+- **.gitignore 修正**：`components/*` + `!components/brookesia_core/`（允许 brookesia_core 入库）
+
+### 验证
+- `idf.py set-target esp32s3` → CMake configure 成功
+- LVGL 9.5.0 + brookesia_core 0.6.0 + esp-boost + esp-lib-utils 全部依赖解析通过
+- 零依赖冲突
+
+---
+
 ## v3.7.0 — 2026-08-05
 
 ### feat

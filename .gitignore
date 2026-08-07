@@ -1,5 +1,6 @@
 tmp/
-components/
+components/*
+!components/brookesia_core/
 managed_components/
 build/
 output/
