@@ -230,10 +230,11 @@ private:
         disp_cfg.hres = DISPLAY_WIDTH;
         disp_cfg.vres = DISPLAY_HEIGHT;
         disp_cfg.color_format = LV_COLOR_FORMAT_RGB565;
-        disp_cfg.flags.buff_dma = 1;
-        disp_cfg.flags.buff_spiram = 0;
-        disp_cfg.flags.sw_rotate = 0;
+        disp_cfg.flags.buff_dma = 0;
+        disp_cfg.flags.buff_spiram = 1;
+        disp_cfg.flags.sw_rotate = 1;
         disp_cfg.flags.swap_bytes = 1;
+        disp_cfg.rounder_cb = rounder_cb;
 
         lv_disp_ = lvgl_port_add_disp(&disp_cfg);
         panel_io_ = panel_io;

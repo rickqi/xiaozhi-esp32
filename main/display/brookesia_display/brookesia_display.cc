@@ -95,35 +95,12 @@ void BrookesiaDisplay::CreatePhoneShell() {
     xiaozhi_app_ = new XiaoZhiApp();
     int app_id = phone_->installApp(*xiaozhi_app_);
     ESP_LOGI(TAG, "App installed id=%d", app_id);
-#if 0
-    ESP_LOGI(TAG, "CreatePhoneShell: lock acquired, creating Phone");
-
-    phone_ = new Phone();
-    ESP_LOGI(TAG, "CreatePhoneShell: Phone created");
-
-    Stylesheet* stylesheet = new Stylesheet(STYLESHEET_410_502_DARK);
-    if (width_ == 410 && height_ == 502) {
-        phone_->addStylesheet(*stylesheet);
-        phone_->activateStylesheet(*stylesheet);
-    }
-    ESP_LOGI(TAG, "CreatePhoneShell: stylesheet set");
-    delete stylesheet;
-
-    if (!phone_->begin()) {
-        ESP_LOGE(TAG, "Phone begin failed");
-        return;
-    }
-    ESP_LOGI(TAG, "CreatePhoneShell: phone->begin() OK");
-
-    xiaozhi_app_ = new XiaoZhiApp();
-    int app_id = phone_->installApp(*xiaozhi_app_);
-    ESP_LOGI(TAG, "CreatePhoneShell: app installed id=%d", app_id);
 
     lv_timer_create([](lv_timer_t* t) {
         auto* self = static_cast<BrookesiaDisplay*>(t->user_data);
         self->UpdateClock();
+        self->UpdateStatusBar(true);
     }, 1000, this);
-#endif
 }
 
 bool BrookesiaDisplay::Lock(int timeout_ms) {
@@ -185,16 +162,26 @@ void BrookesiaDisplay::UpdateStatusBar(bool update_all) {
     DisplayLockGuard lock(this);
 
     auto& board = Board::GetInstance();
-
-    auto* status_bar = phone_->getDisplay().getStatusBar();
+    auto& phone_display = phone_->getDisplay();
+    auto* status_bar = phone_display.getStatusBar();
+    if (!status_bar) return;
 
     int level; bool charging, discharging;
     if (board.GetBatteryLevel(level, charging, discharging)) {
         status_bar->setBatteryPercent(charging, level);
     }
 
-    const char* network_icon = board.GetNetworkStateIcon();
-    (void)network_icon;
+    const char* icon = board.GetNetworkStateIcon();
+    using WifiState = esp_brookesia::systems::phone::StatusBar::WifiState;
+    if (icon && strcmp(icon, FONT_AWESOME_WIFI_SLASH) == 0) {
+        status_bar->setWifiIconState(WifiState::DISCONNECTED);
+    } else if (icon && strcmp(icon, FONT_AWESOME_WIFI_WEAK) == 0) {
+        status_bar->setWifiIconState(WifiState::SIGNAL_1);
+    } else if (icon && strcmp(icon, FONT_AWESOME_WIFI_FAIR) == 0) {
+        status_bar->setWifiIconState(WifiState::SIGNAL_2);
+    } else {
+        status_bar->setWifiIconState(WifiState::SIGNAL_3);
+    }
 }
 
 void BrookesiaDisplay::SetPowerSaveMode(bool on) {
