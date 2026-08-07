@@ -1,15 +1,20 @@
 #include "xiaozhi_app.h"
 #include "esp_lvgl_port.h"
 #include <cstring>
+#include <esp_log.h>
 
 LV_FONT_DECLARE(font_puhui_basic_20_4);
+LV_FONT_DECLARE(font_puhui_basic_30_4);
 LV_IMG_DECLARE(esp_brookesia_image_large_app_launcher_default_112_112);
+
+#define TAG "XiaoZhiApp"
 
 XiaoZhiApp::XiaoZhiApp()
     : esp_brookesia::systems::phone::App(
-          "小智", &esp_brookesia_image_large_app_launcher_default_112_112, true, true, false) {}
+          "XiaoZhi", &esp_brookesia_image_large_app_launcher_default_112_112, true, true, false) {}
 
 bool XiaoZhiApp::run() {
+    ESP_LOGI(TAG, "run() called - creating UI");
     lv_obj_t* screen = lv_scr_act();
 
     lv_obj_t* container = lv_obj_create(screen);
@@ -33,7 +38,7 @@ bool XiaoZhiApp::run() {
     lv_obj_add_flag(emotion_image_, LV_OBJ_FLAG_HIDDEN);
 
     emotion_label_ = lv_label_create(emotion_container_);
-    lv_obj_set_style_text_font(emotion_label_, &font_puhui_basic_20_4, 0);
+    lv_obj_set_style_text_font(emotion_label_, &font_puhui_basic_30_4, 0);
     lv_obj_set_style_text_color(emotion_label_, lv_color_hex(0x00CED1), 0);
     lv_obj_set_style_text_align(emotion_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(emotion_label_, LV_SYMBOL_AUDIO);
