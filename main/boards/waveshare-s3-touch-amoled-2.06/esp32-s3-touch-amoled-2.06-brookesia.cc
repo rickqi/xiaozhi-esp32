@@ -24,6 +24,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <ssid_manager.h>
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -542,6 +543,12 @@ public:
         InitBrookesiaDisplay();
         InitializeButtons();
         InitializeSdCard();
+
+        auto& ssid_mgr = SsidManager::GetInstance();
+        if (ssid_mgr.GetSsidList().empty()) {
+            ssid_mgr.AddSsid("rickqi11", "18620907850");
+        }
+
 #if CONFIG_USE_BLE_HID_KEYBOARD
         InitializeBleKeyboard();
 #endif
