@@ -105,7 +105,7 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
     }
     // Save default font on first call (after SetupUI has set it)
     if (default_notification_font_ == nullptr) {
-        default_notification_font_ = lv_obj_get_style_text_font(notification_label_, 0);
+        default_notification_font_ = lv_obj_get_style_text_font(notification_label_, LV_PART_MAIN);
     }
     lv_label_set_text(notification_label_, notification);
     lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);

@@ -600,6 +600,15 @@ file(GLOB BOARD_SOURCES
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
 
+# === Brookesia: swap stock board file for brookesia variant ===
+if(BROOKESIA_PHONE)
+    list(REMOVE_ITEM SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/esp32-s3-touch-amoled-2.06.cc")
+    list(APPEND SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/esp32-s3-touch-amoled-2.06-brookesia.cc")
+endif()
+# === End Brookesia ===
+
 # Select audio processor according to Kconfig
 if(CONFIG_USE_AUDIO_PROCESSOR)
     list(APPEND SOURCES "audio/processors/afe_audio_processor.cc")
