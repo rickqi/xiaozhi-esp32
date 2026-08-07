@@ -14,7 +14,8 @@ using namespace esp_brookesia::systems::phone;
 BrookesiaDisplay::BrookesiaDisplay(lv_display_t* lv_disp,
                                     esp_lcd_panel_io_handle_t panel_io,
                                     int width, int height)
-    : lv_display_(lv_disp), panel_io_(panel_io) {
+    : panel_io_(panel_io) {
+    display_ = lv_disp;
     width_ = width;
     height_ = height;
 

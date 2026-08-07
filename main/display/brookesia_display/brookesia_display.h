@@ -1,6 +1,6 @@
 #pragma once
 
-#include "display/display.h"
+#include "display/lvgl_display/lvgl_display.h"
 #include "esp_brookesia.hpp"
 #include <lvgl.h>
 #include "esp_lcd_panel_io.h"
@@ -8,7 +8,7 @@
 namespace esp_brookesia::systems::phone { class Phone; }
 class XiaoZhiApp;
 
-class BrookesiaDisplay : public Display {
+class BrookesiaDisplay : public LvglDisplay {
 public:
     BrookesiaDisplay(lv_display_t* lv_disp, esp_lcd_panel_io_handle_t panel_io,
                      int width, int height);
@@ -31,7 +31,6 @@ protected:
     void Unlock() override;
 
 private:
-    lv_display_t* lv_display_;
     esp_lcd_panel_io_handle_t panel_io_;
     esp_brookesia::systems::phone::Phone* phone_ = nullptr;
     XiaoZhiApp* xiaozhi_app_ = nullptr;
