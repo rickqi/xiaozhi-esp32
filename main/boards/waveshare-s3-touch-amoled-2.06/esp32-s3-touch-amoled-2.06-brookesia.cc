@@ -12,6 +12,11 @@
 #include "axp2101.h"
 #include "i2c_device.h"
 #include "backlight.h"
+#include "bluetooth_keyboard.h"
+#include "http_file_server.h"
+#include "version_info.h"
+#include "assets/lang_config.h"
+#include <font_awesome.h>
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -90,6 +95,20 @@ private:
     BrookesiaDisplay* display_;
     CustomBacklight* backlight_;
     PowerSaveTimer* power_save_timer_;
+
+#if CONFIG_USE_BLE_HID_KEYBOARD
+    BluetoothKeyboard bt_keyboard_;
+#endif
+    esp_timer_handle_t user_timer_ = nullptr;
+    char timer_message_[128] = {};
+
+    static void TimerCallback(void* arg) {
+        auto* self = static_cast<BrookesiaAmoled2inch06*>(arg);
+        Application::GetInstance().PlaySound(Lang::Sounds::OGG_POPUP);
+        auto* disp = Board::GetInstance().GetDisplay();
+        if (disp) disp->ShowNotification(self->timer_message_, 10000);
+        ESP_LOGI(TAG, "Timer fired: %s", self->timer_message_);
+    }
 
     void InitializePowerSaveTimer() {
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
@@ -234,15 +253,180 @@ private:
         lvgl_port_add_touch(&touch_cfg);
     }
 
+#if CONFIG_USE_BLE_HID_KEYBOARD
+    void InitializeBleKeyboard() {
+        bt_keyboard_.Init();
+        bt_keyboard_.OnKeyPress([this](uint8_t keycode, uint8_t modifier) {
+            HandleKeyboardKey(keycode, modifier);
+        });
+        bt_keyboard_.OnConnect([this]() {
+            auto* disp = Board::GetInstance().GetDisplay();
+            if (disp) disp->SetBluetoothIcon(FONT_AWESOME_BLUETOOTH);
+        });
+        bt_keyboard_.OnDisconnect([this]() {
+            auto* disp = Board::GetInstance().GetDisplay();
+            if (disp) disp->SetBluetoothIcon("");
+        });
+        if (bt_keyboard_.HasSavedKeyboard()) {
+            bt_keyboard_.AutoReconnect();
+        }
+    }
+
+    void HandleKeyboardKey(uint8_t keycode, uint8_t) {
+        auto& app = Application::GetInstance();
+        auto* codec = Board::GetInstance().GetAudioCodec();
+        switch (keycode) {
+        case 0x28:
+            app.ToggleChatState();
+            break;
+        case 0x29:
+            app.AbortSpeaking(kAbortReasonNone);
+            break;
+        case 0x2C:
+            app.ToggleChatState();
+            break;
+        case 0x52:
+            if (codec) codec->SetOutputVolume(codec->output_volume() + 10);
+            break;
+        case 0x51:
+            if (codec) codec->SetOutputVolume(codec->output_volume() - 10);
+            break;
+        case 0x4D:
+            if (codec) codec->SetOutputVolume(0);
+            break;
+        default:
+            break;
+        }
+    }
+#endif
+
     void InitializeTools() {
-        auto& mcp_server = McpServer::GetInstance();
-        mcp_server.AddTool("self.system.reconfigure_wifi",
+        auto& mcp = McpServer::GetInstance();
+
+        mcp.AddTool("self.system.reconfigure_wifi",
             "End this conversation and enter WiFi configuration mode.\n"
             "**CAUTION** You must ask the user to confirm this action.",
             PropertyList(), [this](const PropertyList&) {
                 EnterWifiConfigMode();
                 return true;
             });
+
+        mcp.AddTool("self.get_version_info",
+            "Get firmware version, build info, and feature list.\n"
+            "Use when user asks about version, features, or build info.",
+            PropertyList(), [](const PropertyList&) -> ReturnValue {
+                return VersionInfo::BuildVersionInfoJson();
+            });
+
+        mcp.AddTool("self.get_mcp_help",
+            "Get usage help for MCP tools. Optional tool_name for specific tool help.\n"
+            "Use when user asks for help or tool list.",
+            PropertyList({
+                Property("tool_name", kPropertyTypeString, std::string(""))
+            }),
+            [](const PropertyList& props) -> ReturnValue {
+                std::string name = props["tool_name"].value<std::string>();
+                auto& srv = McpServer::GetInstance();
+                if (name.empty()) return srv.GetAllToolsHelp();
+                return srv.GetToolHelp(name);
+            });
+
+        mcp.AddTool("self.get_voice_commands",
+            "List all voice commands supported by this device.",
+            PropertyList(), [](const PropertyList&) -> ReturnValue {
+                return std::string(
+                    "本设备支持以下语音命令："
+                    "一、对话控制：说「你好小智」唤醒设备；"
+                    "说「停止」中断回复。"
+                    "二、蓝牙键盘：说「扫描蓝牙键盘」，扫描并连接键盘；"
+                    "说「键盘连上了吗」，查询连接状态。"
+                    "三、状态查询：说「电量多少」，查询电池；"
+                    "说「你的版本是多少」，查看固件版本与功能。"
+                    "四、屏幕控制：说「调亮屏幕」或「调暗屏幕」，调节亮度。"
+                    "五、系统管理：说「重新配网」，进入 WiFi 配网模式；"
+                    "说「设置一个十分钟的定时器」，设定倒计时提醒。");
+            });
+
+        mcp.AddTool("self.set_timer",
+            "Set a countdown timer. Plays sound and shows notification when expired.\n"
+            "duration_minutes: 1-1440 (default 5). message: shown when timer fires.",
+            PropertyList({
+                Property("duration_minutes", kPropertyTypeInteger, 5, 1, 1440),
+                Property("message", kPropertyTypeString, std::string("时间到了"))
+            }),
+            [this](const PropertyList& props) -> ReturnValue {
+                int mins = props["duration_minutes"].value<int>();
+                std::string msg = props["message"].value<std::string>();
+                if (user_timer_) {
+                    esp_timer_stop(user_timer_);
+                    esp_timer_delete(user_timer_);
+                }
+                snprintf(timer_message_, sizeof(timer_message_), "%s", msg.c_str());
+                esp_timer_create_args_t args = {};
+                args.callback = TimerCallback;
+                args.arg = this;
+                args.name = "user_timer";
+                esp_timer_create(&args, &user_timer_);
+                esp_timer_start_once(user_timer_, (int64_t)mins * 60 * 1000000LL);
+                char ret[160];
+                snprintf(ret, sizeof(ret), "Timer set for %d minutes: %s", mins, msg.c_str());
+                return std::string(ret);
+            });
+
+        mcp.AddTool("self.start_file_server",
+            "Start WiFi HTTP file server for wireless file download via browser.",
+            PropertyList(), [](const PropertyList&) -> ReturnValue {
+                auto& srv = HttpFileServer::GetInstance();
+                if (srv.IsRunning()) return std::string("Already running: " + srv.GetUrl());
+                if (srv.Start(80)) return std::string("Started: " + srv.GetUrl());
+                return std::string("Error: failed to start (WiFi connected?)");
+            });
+
+        mcp.AddTool("self.stop_file_server",
+            "Stop the WiFi HTTP file server.",
+            PropertyList(), [](const PropertyList&) -> ReturnValue {
+                auto& srv = HttpFileServer::GetInstance();
+                if (srv.IsRunning()) { srv.Stop(); return std::string("Stopped"); }
+                return std::string("Was not running");
+            });
+
+#if CONFIG_USE_BLE_HID_KEYBOARD
+        mcp.AddTool("self.scan_ble",
+            "Scan for BLE devices to connect a bluetooth keyboard.\n"
+            "Put keyboard in pairing mode first, then call. Second call connects.",
+            PropertyList(), [this](const PropertyList&) -> ReturnValue {
+                if (bt_keyboard_.IsConnected()) {
+                    auto name = bt_keyboard_.ConnectedName();
+                    return std::string("蓝牙键盘已连接：") +
+                           (name.empty() ? std::string("未知") : name);
+                }
+                if (bt_keyboard_.IsScanning())
+                    return std::string("扫描中，约10秒后再问。");
+                bt_keyboard_.StartScan(10);
+                return std::string("已开始扫描，约10秒后再说「扫描蓝牙键盘」连接。");
+            });
+
+        mcp.AddTool("self.get_ble_keyboard_status",
+            "Query bluetooth keyboard connection status.",
+            PropertyList(), [this](const PropertyList&) -> ReturnValue {
+                if (bt_keyboard_.IsConnected()) {
+                    auto name = bt_keyboard_.ConnectedName();
+                    return std::string("已连接：") +
+                           (name.empty() ? std::string("未知") : name);
+                }
+                if (bt_keyboard_.IsScanning())
+                    return std::string("正在扫描中。");
+                return std::string("未连接。请将键盘进入配对模式后说「扫描蓝牙键盘」。");
+            });
+
+        mcp.AddTool("self.get_ble_keyboard_shortcuts",
+            "List bluetooth keyboard shortcut keys.",
+            PropertyList(), [](const PropertyList&) -> ReturnValue {
+                return std::string(
+                    "快捷键：回车=对话切换，Esc=停止，空格=倾听，"
+                    "↑↓=音量±10，M=静音，Tab=提示音。");
+            });
+#endif
     }
 
 public:
@@ -254,6 +438,9 @@ public:
         InitializeSH8601Display();
         InitializeTouch();
         InitializeButtons();
+#if CONFIG_USE_BLE_HID_KEYBOARD
+        InitializeBleKeyboard();
+#endif
         InitializeTools();
     }
 
