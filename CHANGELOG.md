@@ -6,7 +6,7 @@
 
 ---
 
-## feature/brookesia-phone — Phase 0+1（2026-08-07）
+## feature/brookesia-phone — Phase 0-5 完整记录（2026-08-07）
 
 ### 背景
 将 xiaozhi 语音助手移植到 ESP32-S3-Touch-AMOLED-2.06 + esp-brookesia Phone Shell。
@@ -15,27 +15,65 @@
 ### Phase 0：可维护性评估与更新策略
 - **Git 分支策略**：同仓库新分支 `feature/brookesia-phone`，`git merge master` 一键拉取 xiaozhi 更新
 - **代码隔离三原则**：🔒 不改（~25 文件零冲突）/ 🟡 仅追加（5 文件标记块）/ 🔴 新建（零冲突）
-- **板卡双文件法**：原始 `esp32-s3-touch-amoled-2.06.cc` 不改，新建 `-brookesia.cc` 独立编译
+- **板卡双文件法**：原始板卡文件不改，新建 `-brookesia.cc` 独立编译
 - **接口检测脚本**：`scripts/check_interface_changes.sh` 自动检测 Display/Board/MCP 接口变更
-- **半自动合并脚本**：`scripts/merge_xiaozhi_update.sh` 自动解决已知冲突模式
-- **补丁清单**：`docs/brookesia-patch-list.md` 记录所有对 stock 的修改
+- **半自动合并脚本**：`scripts/merge_xiaozhi_update.sh`
+- **补丁清单**：`docs/brookesia-patch-list.md`
 
 ### Phase 1：项目搭建
-- **引入 brookesia_core**（vendored 0.6.0-beta2，32M，`components/brookesia_core/`）
-- **LVGL 版本升级**：~9.3.0 → 9.5.0（brookesia_core 硬性要求）
-- **esp_lvgl_port 升级**：~2.6.0 → ~2.8.0
-- **新增板卡选项**：`CONFIG_BOARD_TYPE_WAVESHARE_S3_TOUCH_AMOLED_2_06_BROOKESIA`
-- **重新启用 LVGL widgets**：LIST / TILEVIEW / MENU / MSGBOX（Phone Shell 需要）
-- **关闭 brookesia AI Framework**：`CONFIG_ESP_BROOKESIA_ENABLE_AI_FRAMEWORK=n`（用自己的 MCP）
-- **brookesia 配置块**：sdkconfig.defaults 末尾追加标记块（合并时保留）
-- **分区表**：`partitions-brookesia.csv`（16MB OTA A/B + 6MB assets）
-- **CMake 扩展块**：CMakeLists.txt 末尾追加 brookesia 组件链接（标记块）
-- **.gitignore 修正**：`components/*` + `!components/brookesia_core/`（允许 brookesia_core 入库）
+- 引入 brookesia_core 0.6.0-beta2（vendored，`components/brookesia_core/`）
+- LVGL ~9.3.0 → 9.5.0、esp_lvgl_port ~2.6.0 → ~2.8.0
+- 新增 AMOLED 2.06 Brookesia 板卡选项
+- 重新启用 LIST/TILEVIEW/MENU/MSGBOX/KEYBOARD/SPINBOX
+- 关闭 brookesia Speaker 系统（不需要，避免分区依赖）
+- 16MB OTA 分区表
 
-### 验证
-- `idf.py set-target esp32s3` → CMake configure 成功
-- LVGL 9.5.0 + brookesia_core 0.6.0 + esp-boost + esp-lib-utils 全部依赖解析通过
-- 零依赖冲突
+### Phase 2：硬件适配
+- brookesia 版板卡文件（双文件法）
+- CMake 条件选择板卡文件（FILTER EXCLUDE REGEX）
+- config.json 添加 brookesia 构建选项（含 BLE HID 键盘）
+- LVGL 9.3→9.5 迁移修复（LV_PART_MAIN / lv_image_cache.h include）
+
+### Phase 3+4：Display 适配器 + XiaoZhiApp
+- **BrookesiaDisplay : public LvglDisplay**（继承 LvglDisplay 获得 SnapshotToJpeg）
+- 实现 Display 接口 10 个虚函数（SetChatMessage/SetEmotion/SetStatus/...）
+- 构造函数创建 Phone Shell + 410×502 暗色样式表 + LvLock 注册
+- 手动 lvgl_port_init（不依赖 SpiLcdDisplay 构造函数，避免 C++ 虚函数陷阱）
+- QSPI 2×2 对齐 rounder callback
+- **XiaoZhiApp : public phone::App**（聊天气泡 UI + 情绪区域 + 通知浮层）
+- 启动前消息缓冲（pending_status_/pending_chat_*）
+
+### 截屏功能
+- BrookesiaDisplay 继承 LvglDisplay → 获 `SnapshotToJpeg()`
+- mcp_server.cc `self.screen.snapshot` 工具通过 `dynamic_cast<LvglDisplay*>` 可用
+- `tools/screenshot_server.py`：开发机 HTTP 服务器接收 JPEG → `output/screenshot_*.jpg`
+
+### Phase 5：MCP 工具迁移 + BLE 键盘
+- 从 waveshare-s3-rlcd-4.2 迁移 11 个 MCP 工具
+- BLE HID 键盘完整集成（BluetoothKeyboard + 快捷键 + 自动重连）
+- 定时器（esp_timer + PlaySound + ShowNotification）
+- 文件服务器（HttpFileServer start/stop）
+- 版本信息 / MCP 帮助 / 语音命令目录
+
+### 截屏链路
+```
+设备: self.screen.snapshot(url, quality)
+  → SnapshotToJpeg() (lv_snapshot_take → JPEG)
+  → HTTP POST → 开发机
+开发机: python tools/screenshot_server.py → output/screenshot_*.jpg
+```
+
+### 未迁移（硬件限制）
+| 工具 | 原因 |
+|------|------|
+| SD 卡工具（录音/音乐/日志） | AMOLED 2.06 未初始化 SD 卡 |
+| 温湿度查询 | 无 SHTC3 传感器 |
+| 硬件自检 | 需针对 AMOLED 2.06 完全重写 |
+
+### 编译验证
+- ESP-IDF v5.5.4 / LVGL 9.5.0 / brookesia_core 0.6.0
+- Binary: 3.7MB / Partition: 4.6MB (22% free)
+- 零编译错误
 
 ---
 
