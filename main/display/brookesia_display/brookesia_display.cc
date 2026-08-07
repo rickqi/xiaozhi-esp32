@@ -72,32 +72,58 @@ BrookesiaDisplay::~BrookesiaDisplay() {
 }
 
 void BrookesiaDisplay::CreatePhoneShell() {
+    ESP_LOGI(TAG, "CreatePhoneShell: full (with stylesheet)");
     DisplayLockGuard lock(this);
 
     phone_ = new Phone();
+    ESP_LOGI(TAG, "Phone created");
 
     Stylesheet* stylesheet = new Stylesheet(STYLESHEET_410_502_DARK);
     if (width_ == 410 && height_ == 502) {
         phone_->addStylesheet(*stylesheet);
         phone_->activateStylesheet(*stylesheet);
     }
+    ESP_LOGI(TAG, "Stylesheet activated");
     delete stylesheet;
 
     if (!phone_->begin()) {
         ESP_LOGE(TAG, "Phone begin failed");
         return;
     }
+    ESP_LOGI(TAG, "Phone begin OK");
 
     xiaozhi_app_ = new XiaoZhiApp();
     int app_id = phone_->installApp(*xiaozhi_app_);
-    if (app_id < 0) {
-        ESP_LOGE(TAG, "Install XiaoZhiApp failed");
+    ESP_LOGI(TAG, "App installed id=%d", app_id);
+#if 0
+    ESP_LOGI(TAG, "CreatePhoneShell: lock acquired, creating Phone");
+
+    phone_ = new Phone();
+    ESP_LOGI(TAG, "CreatePhoneShell: Phone created");
+
+    Stylesheet* stylesheet = new Stylesheet(STYLESHEET_410_502_DARK);
+    if (width_ == 410 && height_ == 502) {
+        phone_->addStylesheet(*stylesheet);
+        phone_->activateStylesheet(*stylesheet);
     }
+    ESP_LOGI(TAG, "CreatePhoneShell: stylesheet set");
+    delete stylesheet;
+
+    if (!phone_->begin()) {
+        ESP_LOGE(TAG, "Phone begin failed");
+        return;
+    }
+    ESP_LOGI(TAG, "CreatePhoneShell: phone->begin() OK");
+
+    xiaozhi_app_ = new XiaoZhiApp();
+    int app_id = phone_->installApp(*xiaozhi_app_);
+    ESP_LOGI(TAG, "CreatePhoneShell: app installed id=%d", app_id);
 
     lv_timer_create([](lv_timer_t* t) {
         auto* self = static_cast<BrookesiaDisplay*>(t->user_data);
         self->UpdateClock();
     }, 1000, this);
+#endif
 }
 
 bool BrookesiaDisplay::Lock(int timeout_ms) {

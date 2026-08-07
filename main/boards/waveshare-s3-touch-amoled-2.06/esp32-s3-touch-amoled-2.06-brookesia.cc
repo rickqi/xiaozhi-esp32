@@ -102,6 +102,8 @@ private:
     BrookesiaDisplay* display_;
     CustomBacklight* backlight_;
     PowerSaveTimer* power_save_timer_;
+    lv_display_t* lv_disp_ = nullptr;
+    esp_lcd_panel_io_handle_t panel_io_ = nullptr;
 
 #if CONFIG_USE_BLE_HID_KEYBOARD
     BluetoothKeyboard bt_keyboard_;
@@ -208,10 +210,15 @@ private:
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
 
+        backlight_ = new CustomBacklight(panel_io);
+        backlight_->RestoreBrightness();
+
         lv_init();
         lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
         port_cfg.task_priority = 4;
         port_cfg.task_affinity = 1;
+        port_cfg.task_stack = 16 * 1024;
+        port_cfg.timer_period_ms = 30;
         ESP_ERROR_CHECK(lvgl_port_init(&port_cfg));
 
         lvgl_port_display_cfg_t disp_cfg = {};
@@ -222,19 +229,19 @@ private:
         disp_cfg.hres = DISPLAY_WIDTH;
         disp_cfg.vres = DISPLAY_HEIGHT;
         disp_cfg.color_format = LV_COLOR_FORMAT_RGB565;
-        disp_cfg.flags.buff_spiram = 1;
-        disp_cfg.flags.sw_rotate = 1;
+        disp_cfg.flags.buff_dma = 1;
+        disp_cfg.flags.buff_spiram = 0;
+        disp_cfg.flags.sw_rotate = 0;
         disp_cfg.flags.swap_bytes = 1;
-        disp_cfg.rounder_cb = rounder_cb;
 
-        lv_display_t* lv_disp = lvgl_port_add_disp(&disp_cfg);
-        assert(lv_disp);
+        lv_disp_ = lvgl_port_add_disp(&disp_cfg);
+        panel_io_ = panel_io;
+        assert(lv_disp_);
+    }
 
-        display_ = new BrookesiaDisplay(lv_disp, panel_io,
+    void InitBrookesiaDisplay() {
+        display_ = new BrookesiaDisplay(lv_disp_, panel_io_,
                                         DISPLAY_WIDTH, DISPLAY_HEIGHT);
-
-        backlight_ = new CustomBacklight(panel_io);
-        backlight_->RestoreBrightness();
     }
 
     void InitializeTouch() {
@@ -253,11 +260,13 @@ private:
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle));
         ESP_LOGI(TAG, "Init touch FT5x06");
         ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_ft5x06(tp_io_handle, &tp_cfg, &tp));
+        ESP_LOGI(TAG, "FT5x06 init OK, adding to lvgl_port");
         const lvgl_port_touch_cfg_t touch_cfg = {
             .disp = lv_display_get_default(),
             .handle = tp,
         };
         lvgl_port_add_touch(&touch_cfg);
+        ESP_LOGI(TAG, "Touch registered with LVGL");
     }
 
 #if CONFIG_USE_BLE_HID_KEYBOARD
@@ -530,6 +539,7 @@ public:
         InitializeSpi();
         InitializeSH8601Display();
         InitializeTouch();
+        InitBrookesiaDisplay();
         InitializeButtons();
         InitializeSdCard();
 #if CONFIG_USE_BLE_HID_KEYBOARD
