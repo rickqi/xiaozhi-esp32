@@ -1,6 +1,7 @@
 #include "wifi_board.h"
 #include "display/brookesia_display/brookesia_display.h"
 #include "esp_lcd_sh8601.h"
+#include "fluidbox_app.h"
 
 #include "codecs/box_audio_codec.h"
 #include "application.h"
@@ -273,6 +274,8 @@ private:
     void InitBrookesiaDisplay() {
         display_ = new BrookesiaDisplay(lv_disp_, panel_io_,
                                         DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        FluidBoxApp::SetPanelHandle(panel_);
+        FluidBoxApp::SetI2cBus(i2c_bus_);
     }
 
     void InitializeTouch() {

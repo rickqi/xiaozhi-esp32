@@ -1,6 +1,7 @@
 tmp/
 components/*
 !components/brookesia_core/
+!components/fluidbox_app/
 managed_components/
 build/
 output/
