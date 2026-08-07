@@ -101,6 +101,8 @@ void BrookesiaDisplay::CreatePhoneShell() {
     auto* fluidbox_app = new FluidBoxApp();
     int fluid_id = phone_->installApp(*fluidbox_app);
     ESP_LOGI(TAG, "FluidBox app installed id=%d", fluid_id);
+    (void)fluidbox_app;
+    (void)fluid_id;
 
     lv_timer_create([](lv_timer_t* t) {
         auto* self = static_cast<BrookesiaDisplay*>(t->user_data);

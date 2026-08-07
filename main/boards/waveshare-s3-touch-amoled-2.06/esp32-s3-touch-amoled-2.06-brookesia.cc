@@ -236,11 +236,6 @@ private:
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
 
-        std::vector<uint16_t> white_buf(DISPLAY_WIDTH, 0xFFFF);
-        for (int y = 0; y < DISPLAY_HEIGHT; y++) {
-            esp_lcd_panel_draw_bitmap(panel, 0, y, DISPLAY_WIDTH, y + 1, white_buf.data());
-        }
-
         backlight_ = new CustomBacklight(panel_io);
         backlight_->RestoreBrightness();
 

@@ -27,6 +27,8 @@ i2c_master_bus_handle_t FluidBoxApp::s_i2c = nullptr;
 static TaskHandle_t s_sim_task = nullptr;
 static TaskHandle_t s_render_task = nullptr;
 static volatile bool s_fluid_running = false;
+static uint32_t s_steps_ = 0;
+static uint32_t s_last_log = 0;
 
 static i2c_master_bus_handle_t s_i2c_bus;
 
@@ -48,6 +50,13 @@ static void sim_task_func(void* arg)
 
         imu_read(dt, &forces);
         sim_step(dt, &forces);
+        s_steps_++;
+        uint32_t now2 = esp_timer_get_time();
+        if (now2 - s_last_log >= 5000000) {
+            s_last_log = now2;
+            ESP_LOGI(TAG, "sim task alive: %u steps/5s", s_steps_);
+            s_steps_ = 0;
+        }
         vTaskDelay(1);
     }
     vTaskDelete(NULL);
@@ -55,8 +64,17 @@ static void sim_task_func(void* arg)
 
 static void render_task_func(void* arg)
 {
+    uint32_t frames = 0;
+    uint32_t last_log = esp_timer_get_time();
     while (s_fluid_running) {
         render_frame();
+        frames++;
+        uint32_t now = esp_timer_get_time();
+        if (now - last_log >= 5000000) {
+            last_log = now;
+            ESP_LOGI(TAG, "render task alive: %u frames/5s", frames);
+            frames = 0;
+        }
         vTaskDelay(1);
     }
     vTaskDelete(NULL);
@@ -100,6 +118,7 @@ bool FluidBoxApp::close()
 
 bool FluidBoxApp::StartFluid()
 {
+    ESP_LOGI(TAG, "StartFluid: begin");
     if (s_fluid_running) {
         return true;
     }
@@ -111,6 +130,7 @@ bool FluidBoxApp::StartFluid()
         ESP_LOGE(TAG, "Failed to set panel handle");
         return false;
     }
+    ESP_LOGI(TAG, "StartFluid: panel ok");
 
     i2c_master_bus_handle_t imu_bus = s_i2c;
     if (imu_bus == nullptr) {
@@ -128,13 +148,19 @@ bool FluidBoxApp::StartFluid()
     if (imu_init(imu_bus) != ESP_OK) {
         ESP_LOGW(TAG, "Continuing without motion input");
     }
+    ESP_LOGI(TAG, "StartFluid: imu done");
 
+    ESP_LOGI(TAG, "StartFluid: stopping LVGL");
     lvgl_port_stop();
+    ESP_LOGI(TAG, "StartFluid: LVGL stopped");
 
     sim_init();
+    ESP_LOGI(TAG, "StartFluid: sim_init done");
     render_init();
+    ESP_LOGI(TAG, "StartFluid: render_init done");
 
     s_fluid_running = true;
+    ESP_LOGI(TAG, "StartFluid: creating tasks");
     xTaskCreatePinnedToCore(sim_task_func, "fb_sim", 8192, NULL, 5, &s_sim_task, 1);
     xTaskCreatePinnedToCore(render_task_func, "fb_render", 8192, NULL, 5, &s_render_task, 0);
 
