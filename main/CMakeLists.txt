@@ -605,7 +605,8 @@ if(BROOKESIA_PHONE)
     list(FILTER SOURCES EXCLUDE REGEX "esp32-s3-touch-amoled-2\\.06\\.cc$")
     list(APPEND SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/display/brookesia_display/brookesia_display.cc"
-        "${CMAKE_CURRENT_SOURCE_DIR}/xiaozhi_app/xiaozhi_app.cc")
+        "${CMAKE_CURRENT_SOURCE_DIR}/xiaozhi_app/xiaozhi_app.cc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/xiaozhi_app/app_icon_xiaozhi_112_112.c")
 endif()
 # === End Brookesia ===
 

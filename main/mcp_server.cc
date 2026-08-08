@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <cstring>
 #include <esp_pthread.h>
+#include <ctime>
+#include <sys/stat.h>
+#include <sys/unistd.h>
 
 #include "application.h"
 #include "display.h"
@@ -187,9 +190,9 @@ void McpServer::AddUserOnlyTools() {
             });
 
 #if CONFIG_LV_USE_SNAPSHOT
-        AddUserOnlyTool("self.screen.snapshot", "Snapshot the screen and upload it to a specific URL",
+        AddUserOnlyTool("self.screen.snapshot", "Capture the screen. Saves a JPEG to the SD card; optionally uploads it to a URL.",
             PropertyList({
-                Property("url", kPropertyTypeString),
+                Property("url", kPropertyTypeString, std::string("")),
                 Property("quality", kPropertyTypeInteger, 80, 1, 100)
             }),
             [display](const PropertyList& properties) -> ReturnValue {
@@ -201,44 +204,72 @@ void McpServer::AddUserOnlyTools() {
                     throw std::runtime_error("Failed to snapshot screen");
                 }
 
-                ESP_LOGI(TAG, "Upload snapshot %u bytes to %s", jpeg_data.size(), url.c_str());
-                
-                // 构造multipart/form-data请求体
-                std::string boundary = "----ESP32_SCREEN_SNAPSHOT_BOUNDARY";
-                
-                auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
-                http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-                if (!http->Open("POST", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
-                }
-                {
-                    // 文件字段头部
-                    std::string file_header;
-                    file_header += "--" + boundary + "\r\n";
-                    file_header += "Content-Disposition: form-data; name=\"file\"; filename=\"screenshot.jpg\"\r\n";
-                    file_header += "Content-Type: image/jpeg\r\n";
-                    file_header += "\r\n";
-                    http->Write(file_header.c_str(), file_header.size());
+                // Primary: save to the SD card (network may be unreachable from
+                // the LAN device to the dev machine).
+                std::string saved;
+                time_t now = time(nullptr);
+                struct tm tm;
+                localtime_r(&now, &tm);
+                char path[96];
+                snprintf(path, sizeof(path), "/sdcard/screenshots/screenshot_%04d%02d%02d_%02d%02d%02d.jpg",
+                         tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                         tm.tm_hour, tm.tm_min, tm.tm_sec);
+                mkdir("/sdcard/screenshots", 0755);
+                FILE* f = fopen(path, "wb");
+                if (f != nullptr) {
+                    fwrite(jpeg_data.data(), 1, jpeg_data.size(), f);
+                    fclose(f);
+                    saved = path;
+                    ESP_LOGI(TAG, "Snapshot saved to %s (%u bytes)", path, (unsigned)jpeg_data.size());
+                } else {
+                    ESP_LOGW(TAG, "Cannot save snapshot to SD: errno=%d", errno);
                 }
 
-                // JPEG数据
-                http->Write((const char*)jpeg_data.data(), jpeg_data.size());
+                // Secondary: upload if a URL was provided.
+                if (!url.empty()) {
+                    ESP_LOGI(TAG, "Upload snapshot %u bytes to %s", jpeg_data.size(), url.c_str());
+                    try {
+                        // 构造multipart/form-data请求体
+                        std::string boundary = "----ESP32_SCREEN_SNAPSHOT_BOUNDARY";
+                        auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
+                        http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+                        if (!http->Open("POST", url)) {
+                            throw std::runtime_error("Failed to open URL: " + url);
+                        }
+                        {
+                            // 文件字段头部
+                            std::string file_header;
+                            file_header += "--" + boundary + "\r\n";
+                            file_header += "Content-Disposition: form-data; name=\"file\"; filename=\"screenshot.jpg\"\r\n";
+                            file_header += "Content-Type: image/jpeg\r\n";
+                            file_header += "\r\n";
+                            http->Write(file_header.c_str(), file_header.size());
+                        }
 
-                {
-                    // multipart尾部
-                    std::string multipart_footer;
-                    multipart_footer += "\r\n--" + boundary + "--\r\n";
-                    http->Write(multipart_footer.c_str(), multipart_footer.size());
-                }
-                http->Write("", 0);
+                        // JPEG数据
+                        http->Write((const char*)jpeg_data.data(), jpeg_data.size());
 
-                if (http->GetStatusCode() != 200) {
-                    throw std::runtime_error("Unexpected status code: " + std::to_string(http->GetStatusCode()));
+                        {
+                            // multipart尾部
+                            std::string multipart_footer;
+                            multipart_footer += "\r\n--" + boundary + "--\r\n";
+                            http->Write(multipart_footer.c_str(), multipart_footer.size());
+                        }
+                        http->Write("", 0);
+
+                        if (http->GetStatusCode() != 200) {
+                            throw std::runtime_error("Unexpected status code: " + std::to_string(http->GetStatusCode()));
+                        }
+                        std::string result = http->ReadAll();
+                        http->Close();
+                        ESP_LOGI(TAG, "Snapshot screen result: %s", result.c_str());
+                    } catch (const std::exception& e) {
+                        ESP_LOGW(TAG, "Snapshot upload failed (%s); saved to SD", e.what());
+                    }
                 }
-                std::string result = http->ReadAll();
-                http->Close();
-                ESP_LOGI(TAG, "Snapshot screen result: %s", result.c_str());
-                return true;
+                return saved.empty()
+                    ? std::string("Snapshot captured but SD not available")
+                    : "Snapshot saved to " + saved;
             });
         
         AddUserOnlyTool("self.screen.preview_image", "Preview an image on the screen",

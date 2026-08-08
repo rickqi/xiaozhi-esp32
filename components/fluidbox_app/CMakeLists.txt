@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "fluidbox_app.cc"
+        "app_icon_custom_112_112.c"
         "fb_display.c"
         "sim.c"
         "render.c"

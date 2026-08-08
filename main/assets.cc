@@ -167,6 +167,16 @@ bool Assets::Apply() {
             // matched (both <size>_<bpp>), so line metrics stay consistent.
             LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
             lv_font_t* text_font_handle = const_cast<lv_font_t*>(text_font->font());
+            // The cbin font blobs carry line_height/base_line = 0, and
+            // lv_font_get_line_height() has no fallback, so text would lay out
+            // every line at height 0 (lines collapse into black bars). Fix the
+            // metrics to match the compiled-in basic font (30px/4bpp).
+            if (text_font_handle->line_height <= 0) {
+                text_font_handle->line_height = BUILTIN_TEXT_FONT.line_height;
+            }
+            if (text_font_handle->base_line <= 0) {
+                text_font_handle->base_line = BUILTIN_TEXT_FONT.base_line;
+            }
             text_font_handle->fallback = &BUILTIN_TEXT_FONT;
             if (light_theme != nullptr) {
                 light_theme->set_text_font(text_font);

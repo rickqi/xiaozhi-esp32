@@ -6,6 +6,23 @@
 
 ---
 
+## v3.9.0 — 2026-08-08
+
+### feat
+- **SD 卡支持**：挂载（1-bit SDMMC）、对话日志/录音/音乐/截图保存到 SD 卡；修复 `InitializeSdCard` 幂等性（二次挂载失败导致所有 SD MCP 工具报 "no SD card"）
+- **截图保存 SD**：`self.screen.snapshot` 保存 JPEG 到 `/sdcard/screenshots/`（网络不可达也可靠）；新增 **BOOT 键长按**直接截图
+- **手势边缘返回**：启用左右边缘滑动返回（`enable_gesture_navigation_back`），对话中边缘滑动直接退出（底部上滑需 recents 快照，可靠性差）
+- **录音进度**：录音中每秒显示 "Recording... Xs" 进度通知（原仅结束时提示）
+- **气泡首次渲染黑线修复**：`LV_ANIM_ON` 滚动动画期间布局不稳定导致新气泡首帧错位（黑线），改立即滚动 + 布局稳定后重新 invalidate
+
+### fix
+- **中文显示优化**：气泡/状态/通知统一使用 assets 全量 CJK 字体（18000+ 字），音乐中文文件名、状态文字完整显示；emotion 图标用 icon 字体（PUA 符号）
+- **状态栏重叠**：聊天界面内容预留顶部 50px（StatusBar 透明 overlay）
+- **"聆听中"圆角截断**：状态文字居中 + 左右 padding
+- 已知限制：生僻字（如"嘞"）不在 18000 字库，仍显示方块
+
+---
+
 ## feature/brookesia-phone — Phase 0-5 完整记录（2026-08-07）
 
 ### 背景

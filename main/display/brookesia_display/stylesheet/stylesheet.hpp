@@ -53,7 +53,9 @@ constexpr Manager::Data STYLESHEET_410_502_DARK_MANAGER_DATA = {
     },
     .flags = {
         .enable_gesture = 1,
-        .enable_gesture_navigation_back = 0,
+        // Edge-swipe back works without any recents snapshot, unlike the
+        // bottom-up recents gesture (which needs a snapshot to show).
+        .enable_gesture_navigation_back = 1,
         .enable_recents_screen_snapshot_drag = 1,
         .enable_recents_screen_hide_when_no_snapshot = 1,
     },

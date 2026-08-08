@@ -18,6 +18,8 @@ extern "C" {
 #include "esp_lcd_panel_io.h"
 #include "lvgl.h"
 
+LV_IMAGE_DECLARE(app_icon_custom_112_112);
+
 #define TAG "FluidBoxApp"
 #define I2C_PORT I2C_NUM_0
 #define I2C_SDA GPIO_NUM_15
@@ -213,11 +215,9 @@ static void render_task_func(void* arg)
 // FluidBoxApp
 // ---------------------------------------------------------------------------
 
-LV_IMG_DECLARE(esp_brookesia_image_large_app_launcher_default_112_112);
-
 FluidBoxApp::FluidBoxApp()
     : esp_brookesia::systems::phone::App(
-          "FluidBox", &esp_brookesia_image_large_app_launcher_default_112_112, true, true, false) {}
+          "FluidBox", &app_icon_custom_112_112, true, true, false) {}
 
 bool FluidBoxApp::run()
 {

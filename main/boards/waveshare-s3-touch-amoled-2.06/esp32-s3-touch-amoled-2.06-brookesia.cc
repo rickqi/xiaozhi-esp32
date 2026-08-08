@@ -1,5 +1,6 @@
 #include "wifi_board.h"
 #include "display/brookesia_display/brookesia_display.h"
+#include "display/lvgl_display/lvgl_display.h"
 #include "esp_lcd_sh8601.h"
 #include "fluidbox_app.h"
 
@@ -207,6 +208,41 @@ private:
             }
         });
 #endif
+        // Long-press the BOOT key to capture the screen to the SD card
+        // (/sdcard/screenshots/). Independent of voice/MCP so screenshots are
+        // always reachable.
+        boot_button_.OnLongPress([this]() {
+            auto* lvgl_disp = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
+            if (lvgl_disp == nullptr) {
+                ESP_LOGE(TAG, "Display is not LvglDisplay, cannot snapshot");
+                return;
+            }
+            std::string jpeg;
+            if (!lvgl_disp->SnapshotToJpeg(jpeg, 80)) {
+                ESP_LOGE(TAG, "Long-press snapshot failed");
+                ShowNotify("Shot Failed");
+                return;
+            }
+            time_t now = time(nullptr);
+            struct tm tm;
+            localtime_r(&now, &tm);
+            char path[96];
+            snprintf(path, sizeof(path), "/sdcard/screenshots/screenshot_%04d%02d%02d_%02d%02d%02d.jpg",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                     tm.tm_hour, tm.tm_min, tm.tm_sec);
+            mkdir("/sdcard/screenshots", 0755);
+            FILE* f = fopen(path, "wb");
+            if (f != nullptr) {
+                fwrite(jpeg.data(), 1, jpeg.size(), f);
+                fclose(f);
+                ESP_LOGI(TAG, "Long-press snapshot saved: %s (%u bytes)",
+                         path, (unsigned)jpeg.size());
+                ShowNotify("Shot Saved", 2000);
+            } else {
+                ESP_LOGE(TAG, "Cannot save snapshot: errno=%d", errno);
+                ShowNotify("Shot Failed");
+            }
+        });
     }
 
     void InitializeSH8601Display() {
@@ -350,6 +386,13 @@ private:
 #endif
 
     bool InitializeSdCard() {
+        // Idempotent: the card is mounted once at boot; a second mount call on
+        // the same path fails (ESP_ERR_INVALID_STATE), which made every SD MCP
+        // tool (list_chatlogs/recordings/music) report "no SD card" after boot.
+        struct stat st;
+        if (stat("/sdcard", &st) == 0) {
+            return true;
+        }
         sdmmc_host_t host = SDMMC_HOST_DEFAULT();
         host.flags = SDMMC_HOST_FLAG_1BIT;
         host.slot = SDMMC_HOST_SLOT_1;
@@ -453,6 +496,7 @@ private:
 
         const int chunk_samples = 512;
         std::vector<int16_t> pcm(chunk_samples * channels);
+        uint32_t last_prog_ms = 0;
         while (recording_) {
             uint32_t now_ms = esp_timer_get_time() / 1000;
             if (recording_until_ms_ > 0 && now_ms >= recording_until_ms_) {
@@ -462,6 +506,15 @@ private:
             if (codec->InputData(pcm)) {
                 fwrite(pcm.data(), 1, pcm.size() * sizeof(int16_t), f);
                 data_len += pcm.size() * sizeof(int16_t);
+            }
+            // Report progress once per second so the user sees the recording
+            // is live instead of only seeing the final "Saved..." toast.
+            if (recording_until_ms_ > 0 && now_ms - last_prog_ms >= 1000) {
+                last_prog_ms = now_ms;
+                char prog[40];
+                snprintf(prog, sizeof(prog), "Recording... %lus",
+                         (unsigned long)((recording_until_ms_ - now_ms) / 1000));
+                ShowNotify(prog, 1500);
             }
             vTaskDelay(pdMS_TO_TICKS(2));
         }
