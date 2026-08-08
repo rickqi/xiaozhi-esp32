@@ -18,6 +18,13 @@ public:
 
     static void SetPanelHandle(esp_lcd_panel_handle_t panel) { s_panel = panel; }
     static void SetI2cBus(i2c_master_bus_handle_t bus) { s_i2c = bus; }
+    static i2c_master_bus_handle_t GetI2cBus() { return s_i2c; }
+    static bool IsRunning();
+
+    /// Signal FluidBox to exit back to Phone Shell home.
+    /// Safe to call from any context (BLE callback, timer, etc.).
+    /// The touch-monitor task picks this up on its next poll cycle (~50 ms).
+    static void RequestExit();
 
     bool StartFluid();
     void StopFluid();

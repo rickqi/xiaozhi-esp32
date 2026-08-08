@@ -91,6 +91,19 @@
 
 ---
 
+## v3.8.0 — 2026-08-08
+
+### feat
+- **FluidBox 退出机制**：长按屏幕 >800ms 触发退出，通过独立 FT5x06 I2C 轮询任务实现（LVGL 挂起时仍可检测触摸），退出后正确恢复 Phone Shell 主屏（`sendNavigateEvent(HOME)` → 暂停 App + 切换主屏 + 清理 FluidBox 屏幕）
+- **BLE 键盘 Esc 键退出 FluidBox**：FluidBox 运行时按 Esc 触发 `RequestExit()`（非运行时保持原有 AbortSpeaking 行为），通过 volatile flag 通知触摸轮询任务执行退出序列
+
+### fix
+- FluidBox 退出时正确释放 FT5x06 瞬时 I2C 设备（`i2c_master_bus_rm_device`），避免共享总线设备泄漏
+- 使用 `sendNavigateEvent` 公共 API 替代私有 `processNavigationEvent`（Phone Manager 中为 private override）
+- 使用正确的 IDF 5.5 I2C API `i2c_master_transmit_receive`（非旧版 `i2c_master_write_read_device`）
+
+---
+
 ## v3.7.0 — 2026-08-05
 
 ### feat

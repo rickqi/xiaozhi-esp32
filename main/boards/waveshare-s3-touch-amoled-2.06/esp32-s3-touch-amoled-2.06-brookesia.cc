@@ -325,7 +325,11 @@ private:
             app.ToggleChatState();
             break;
         case 0x29:
-            app.AbortSpeaking(kAbortReasonNone);
+            if (FluidBoxApp::IsRunning()) {
+                FluidBoxApp::RequestExit();
+            } else {
+                app.AbortSpeaking(kAbortReasonNone);
+            }
             break;
         case 0x2C:
             app.ToggleChatState();

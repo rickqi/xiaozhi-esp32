@@ -46,6 +46,7 @@ static const char* kFeatures[] = {
     "语音命令大全：说“有哪些语音命令”按分类播报全部可用语音指令",
     "MCP 帮助：说“帮助”查看全部 MCP 工具概览；说“帮助 工具名”获取具体工具用法",
     "字体系统：内置基础字库 + assets 全量中文字库（18000+字）双层，缺字自动回退，图标字体可 OTA 定制",
+    "FluidBox 流体模拟 App：长按屏幕退出，BLE Esc 键退出（AMOLED 2.06 Brookesia 板）",
 };
 
 std::string GetVersionString() {
