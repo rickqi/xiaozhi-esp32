@@ -19,12 +19,12 @@ public:
     static void SetPanelHandle(esp_lcd_panel_handle_t panel) { s_panel = panel; }
     static void SetI2cBus(i2c_master_bus_handle_t bus) { s_i2c = bus; }
 
+    bool StartFluid();
+    void StopFluid();
+
 private:
     static esp_lcd_panel_handle_t s_panel;
     static i2c_master_bus_handle_t s_i2c;
-
-    bool StartFluid();
-    void StopFluid();
 
     void CreateInfoLabel(lv_obj_t* screen);
 };

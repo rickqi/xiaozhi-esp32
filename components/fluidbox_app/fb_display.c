@@ -9,7 +9,8 @@
 
 static const char *TAG = "fluidbox_disp";
 
-static uint16_t *s_band_buf;   // DMA pool, allocated lazily
+static uint16_t *s_band_buf[2];  // double-buffered: one may be transmitting via SPI while the other is being drawn
+static int s_next_band = 0;
 static esp_lcd_panel_handle_t s_panel;
 
 esp_err_t fb_panel_set_handle(esp_lcd_panel_handle_t panel)
@@ -18,11 +19,13 @@ esp_err_t fb_panel_set_handle(esp_lcd_panel_handle_t panel)
         return ESP_ERR_INVALID_ARG;
     }
     s_panel = panel;
-    if (s_band_buf == NULL) {
-        s_band_buf = (uint16_t*)heap_caps_malloc(BAND_PIXELS * sizeof(uint16_t), MALLOC_CAP_DMA);
-        if (s_band_buf == NULL) {
-            ESP_LOGE(TAG, "band buffer alloc failed");
-            return ESP_ERR_NO_MEM;
+    if (s_band_buf[0] == NULL) {
+        for (int i = 0; i < 2; i++) {
+            s_band_buf[i] = (uint16_t*)heap_caps_malloc(BAND_PIXELS * sizeof(uint16_t), MALLOC_CAP_DMA);
+            if (s_band_buf[i] == NULL) {
+                ESP_LOGE(TAG, "band buffer %d alloc failed", i);
+                return ESP_ERR_NO_MEM;
+            }
         }
     }
     return ESP_OK;
@@ -30,7 +33,7 @@ esp_err_t fb_panel_set_handle(esp_lcd_panel_handle_t panel)
 
 uint16_t *fb_acquire_band(void)
 {
-    return s_band_buf;
+    return s_band_buf[s_next_band++ & 1];
 }
 
 esp_err_t fb_flush_band(int band_index, const uint16_t *buffer)
@@ -43,7 +46,11 @@ esp_err_t fb_flush_band(int band_index, const uint16_t *buffer)
     if (y0 >= y1) {
         return ESP_OK;
     }
-    return esp_lcd_panel_draw_bitmap(s_panel, 0, y0, LCD_H_RES, y1, buffer);
+    esp_err_t ret = esp_lcd_panel_draw_bitmap(s_panel, 0, y0, LCD_H_RES, y1, buffer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "draw_bitmap band %d failed: %s", band_index, esp_err_to_name(ret));
+    }
+    return ret;
 }
 
 esp_err_t fb_set_brightness(uint8_t level)

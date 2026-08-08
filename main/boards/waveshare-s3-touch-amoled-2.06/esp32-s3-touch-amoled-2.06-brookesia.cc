@@ -267,10 +267,10 @@ private:
     }
 
     void InitBrookesiaDisplay() {
-        display_ = new BrookesiaDisplay(lv_disp_, panel_io_,
-                                        DISPLAY_WIDTH, DISPLAY_HEIGHT);
         FluidBoxApp::SetPanelHandle(panel_);
         FluidBoxApp::SetI2cBus(i2c_bus_);
+        display_ = new BrookesiaDisplay(lv_disp_, panel_io_,
+                                        DISPLAY_WIDTH, DISPLAY_HEIGHT);
     }
 
     void InitializeTouch() {

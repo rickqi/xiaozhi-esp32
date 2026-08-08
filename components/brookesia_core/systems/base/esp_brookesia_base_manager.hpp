@@ -106,10 +106,12 @@ protected:
     Context &_system_context;
     const Data &_core_data;
 
+public:
+    bool startApp(int id);
+
 private:
     bool begin(void);
     bool del(void);
-    bool startApp(int id);
 
     static void onAppEventCallback(lv_event_t *event);
     static void onNavigationEventCallback(lv_event_t *event);

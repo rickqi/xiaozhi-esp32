@@ -14,6 +14,8 @@ idf_component_register(
         brookesia_core
         waveshare__qmi8658
         log
+    PRIV_REQUIRES
+        main
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE

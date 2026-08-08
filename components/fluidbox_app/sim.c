@@ -228,7 +228,7 @@ void sim_init(void)
 // up adjacent in memory, which matters a lot on a CPU with a small cache.
 static void rebuild_grid(void)
 {
-    memset(s_cell_start, 0, sizeof(s_cell_start));
+    memset(s_cell_start, 0, (size_t)(GRID_CELLS + 1) * sizeof(uint16_t));
 
     for (int i = 0; i < s_count; i++) {
         int cx = (int)(s_p->pos[i][0] * s_cell_scale_x);
