@@ -75,6 +75,20 @@
 - Binary: 3.7MB / Partition: 4.6MB (22% free)
 - 零编译错误
 
+### Phase 6：FluidBox 3D 流体 App 移植（2026-08-08）
+
+**feat**
+- 从 esp32-fluidbox 移植 3D 流体模拟为 Phone Shell App（`components/fluidbox_app/`）：sim（SPH 900 粒子 PSRAM 数组）/ render（band 分条带渲染）/ imu（QMI8658 运动感应）/ fb_display（DMA band buffer）
+- launcher 任务方案：`run()` 建黑屏 → 独立任务延迟 500ms → `StartFluid()`（`lvgl_port_suspend` + audio stop 后启动 sim/render 双任务），避免 LVGL 上下文自杀式挂起
+- `esp_lvgl_port` 补丁：`lvgl_port_start/suspend/resume`（managed_components 本地修改）
+- 安装为 launcher 可点击 App（launcher 图标启动，返回退出）
+
+**fix（崩溃根因）**
+- `sim.c rebuild_grid()`：`memset(s_cell_start, 0, sizeof(s_cell_start))`——数组改为 PSRAM 指针后 `sizeof` 退化为 4 字节，只清零 4 字节导致 cell 计数为垃圾值 → `s_cursor` 越界写 PSRAM 堆 TLSF 元数据 → 后续任一 malloc（表现为 WiFi/audio `i2s_new_channel`）崩溃。修复为 `(GRID_CELLS+1)*sizeof(uint16_t)`。
+- `fb_display.c`：band buffer 单缓冲 → 双缓冲（`trans_queue_depth=10` 使 `draw_bitmap` 异步，单缓冲被下一 band 的 `memset` 破坏 → 黑色横线 + 残影）
+- render 任务限 30fps（QSPI 40MHz 全屏上限 ~48fps，原 251fps 超载）
+- 移除调试：sim/render 心跳日志、自动 `startApp`（改用户点击）
+
 ---
 
 ## v3.7.0 — 2026-08-05
