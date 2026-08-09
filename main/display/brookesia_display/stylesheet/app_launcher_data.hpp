@@ -11,12 +11,12 @@ namespace esp_brookesia::systems::phone {
 
 constexpr AppLauncherIcon::Data STYLESHEET_410_502_DARK_APP_LAUNCHER_ICON_DATA = {
     .main = {
-        .size = gui::StyleSize::SQUARE(200),
+        .size = gui::StyleSize::SQUARE(160),
         .layout_row_pad = 10,
     },
     .image = {
-        .default_size = gui::StyleSize::SQUARE(120),
-        .press_size = gui::StyleSize::SQUARE(110),
+        .default_size = gui::StyleSize::SQUARE(105),
+        .press_size = gui::StyleSize::SQUARE(95),
     },
     .label = {
         .text_font = gui::StyleFont::SIZE(16),

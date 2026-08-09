@@ -3,6 +3,7 @@
 #include "display/lvgl_display/lvgl_display.h"
 #include "esp_lcd_sh8601.h"
 #include "fluidbox_app.h"
+#include "video_player_app.h"
 
 #include "codecs/box_audio_codec.h"
 #include "application.h"
@@ -190,6 +191,19 @@ private:
         ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
+        static void MemoryMonitorTask(void* arg) {
+        auto* board = static_cast<BrookesiaAmoled2inch06*>(arg);
+        (void)board;
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            auto* disp = dynamic_cast<BrookesiaDisplay*>(Board::GetInstance().GetDisplay());
+            if (disp != nullptr && lvgl_port_lock(1000)) {
+                disp->UpdateRecentsMemory();
+                lvgl_port_unlock();
+            }
+        }
+    }
+
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
@@ -267,7 +281,18 @@ private:
         ESP_ERROR_CHECK(esp_lcd_new_panel_sh8601(panel_io, &panel_config, &panel));
         esp_lcd_panel_set_gap(panel, 0x16, 0);
         esp_lcd_panel_reset(panel);
-        esp_lcd_panel_init(panel);
+        // A transient SPI bus conflict at boot ("Cannot acquire bus when a
+        // polling transaction is in progress") can fail the init commands,
+        // leaving the panel uninitialized -> corrupt/black display and LVGL
+        // flush stalls (slow touch, watchdog under high LVGL priority).
+        esp_err_t init_ret;
+        for (int i = 0; i < 3; i++) {
+            init_ret = esp_lcd_panel_init(panel);
+            if (init_ret == ESP_OK) break;
+            ESP_LOGW(TAG, "panel init failed (%s), retry %d", esp_err_to_name(init_ret), i + 1);
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        ESP_ERROR_CHECK(init_ret);
         esp_lcd_panel_invert_color(panel, false);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
@@ -277,7 +302,9 @@ private:
 
         lv_init();
         lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-        port_cfg.task_priority = 1;
+        // SPI init retry above fixes the boot conflict; priority 2 keeps the
+        // LVGL/touch task responsive without the watchdog reboot seen at 4.
+        port_cfg.task_priority = 2;
         port_cfg.task_affinity = 1;
         port_cfg.task_stack = 16 * 1024;
         port_cfg.timer_period_ms = 500;
@@ -295,6 +322,9 @@ private:
         disp_cfg.flags.buff_spiram = 0;
         disp_cfg.flags.sw_rotate = 0;
         disp_cfg.flags.swap_bytes = 1;
+        // SH8601 requires 2-pixel aligned window coordinates; without this the
+        // draw_bitmap CASET/RASET can land off-by-one and corrupt the image.
+        disp_cfg.rounder_cb = rounder_cb;
 
         lv_disp_ = lvgl_port_add_disp(&disp_cfg);
         panel_io_ = panel_io;
@@ -305,6 +335,7 @@ private:
     void InitBrookesiaDisplay() {
         FluidBoxApp::SetPanelHandle(panel_);
         FluidBoxApp::SetI2cBus(i2c_bus_);
+        VideoPlayerApp::SetPanelHandle(panel_);
         display_ = new BrookesiaDisplay(lv_disp_, panel_io_,
                                         DISPLAY_WIDTH, DISPLAY_HEIGHT);
     }
@@ -414,6 +445,8 @@ private:
             mkdir("/sdcard/music", 0755);
             mkdir("/sdcard/logs", 0755);
             mkdir("/sdcard/logs/chatlogs", 0755);
+            mkdir("/sdcard/screenshots", 0755);
+            mkdir("/sdcard/sensors", 0755);
             ESP_LOGI(TAG, "SD card mounted at /sdcard");
             return true;
         }
@@ -1423,8 +1456,11 @@ private:
 
         mcp.AddTool("self.start_file_server",
             "Start WiFi HTTP file server for wireless file download via browser.",
-            PropertyList(), [](const PropertyList&) -> ReturnValue {
+            PropertyList(), [this](const PropertyList&) -> ReturnValue {
                 auto& srv = HttpFileServer::GetInstance();
+                if (!InitializeSdCard()) {
+                    return std::string("Error: no SD card mounted");
+                }
                 if (srv.IsRunning()) return std::string("Already running: " + srv.GetUrl());
                 if (srv.Start(80)) return std::string("Started: " + srv.GetUrl());
                 return std::string("Error: failed to start (WiFi connected?)");
@@ -1662,6 +1698,9 @@ public:
         InitBrookesiaDisplay();
         InitializeButtons();
         InitializeSdCard();
+
+        // Memory monitor: refresh the recents-screen SRAM/PSRAM label every 5s.
+        xTaskCreate(MemoryMonitorTask, "mem_monitor", 4096, this, 1, nullptr);
 
         auto& ssid_mgr = SsidManager::GetInstance();
         if (ssid_mgr.GetSsidList().empty()) {

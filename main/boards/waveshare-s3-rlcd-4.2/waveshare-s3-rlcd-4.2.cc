@@ -541,11 +541,14 @@ private:
         }
         sdcard_mounted_ = true;
         sdmmc_card_print_info(stdout, sdcard_card_);
-        // Ensure records, logs and music directories exist
+        // Ensure records, logs, music, screenshots and sensors directories exist
         int ret_rec = mkdir("/sdcard/records", 0755);
         int ret_log = mkdir("/sdcard/logs", 0755);
         int ret_music = mkdir("/sdcard/music", 0755);
-        ESP_LOGI(TAG, "SD dirs: records=%d logs=%d music=%d", ret_rec, ret_log, ret_music);
+        int ret_shot = mkdir("/sdcard/screenshots", 0755);
+        int ret_sens = mkdir("/sdcard/sensors", 0755);
+        ESP_LOGI(TAG, "SD dirs: records=%d logs=%d music=%d screenshots=%d sensors=%d",
+                 ret_rec, ret_log, ret_music, ret_shot, ret_sens);
         ESP_LOGI(TAG, "SD card mounted");
         return true;
     }
@@ -2413,6 +2416,9 @@ private:
             PropertyList(),
             [](const PropertyList&) -> ReturnValue {
                 auto &srv = HttpFileServer::GetInstance();
+                if (!InitializeSdCard()) {
+                    return std::string("Error: no SD card mounted");
+                }
                 if (srv.IsRunning()) {
                     return std::string("File server already running: " + srv.GetUrl());
                 }

@@ -25,6 +25,7 @@ public:
     void UpdateStatusBar(bool update_all = false) override;
     void SetPowerSaveMode(bool on) override;
     void SetBluetoothIcon(const char* icon) override;
+    void UpdateRecentsMemory();
 
 protected:
     bool Lock(int timeout_ms = 0) override;

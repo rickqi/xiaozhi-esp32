@@ -1,6 +1,8 @@
 #include "brookesia_display.h"
 #include "xiaozhi_app/xiaozhi_app.h"
 #include "fluidbox_app.h"
+#include "monthly_cat_app.h"
+#include "video_player_app.h"
 #include "board.h"
 #include "esp_lvgl_port.h"
 #include <esp_log.h>
@@ -9,6 +11,7 @@
 #include "display/lvgl_display/emoji_collection.h"
 #include "display/lvgl_display/lvgl_font.h"
 #include <font_awesome.h>
+#include <esp_heap_caps.h>
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
@@ -102,6 +105,14 @@ void BrookesiaDisplay::CreatePhoneShell() {
     ESP_LOGI(TAG, "FluidBox app installed id=%d", fluid_id);
     (void)fluidbox_app;
     (void)fluid_id;
+
+    auto* monthly_cat_app = new MonthlyCatApp();
+    int cat_id = phone_->installApp(*monthly_cat_app);
+    ESP_LOGI(TAG, "SalaryCat app installed id=%d", cat_id);
+
+    auto* video_app = new VideoPlayerApp();
+    int video_id = phone_->installApp(*video_app);
+    ESP_LOGI(TAG, "Video app installed id=%d", video_id);
 
     lv_timer_create([](lv_timer_t* t) {
         auto* self = static_cast<BrookesiaDisplay*>(t->user_data);
@@ -200,7 +211,18 @@ void BrookesiaDisplay::SetPowerSaveMode(bool on) {
     }
 }
 
-void BrookesiaDisplay::SetBluetoothIcon(const char* icon) {
+void BrookesiaDisplay::SetBluetoothIcon(const char* icon) {}
+
+void BrookesiaDisplay::UpdateRecentsMemory() {
+    if (!phone_) return;
+    auto* recents = phone_->getDisplay().getRecentsScreen();
+    if (recents == nullptr) return;
+    // setMemoryLabel(internal_free, external_free, internal_total, external_total)
+    recents->setMemoryLabel(
+        (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (int)heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+        (int)heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
 }
 
 void BrookesiaDisplay::UpdateClock() {
